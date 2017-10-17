@@ -1,0 +1,5 @@
+0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 5, 8, 6, 13, 7, 21, 8, 34, 9, 55, def F(n): if n == 0: return 0; elif n == 1: return 1; else: return F(n-1)+F(n-2)
+0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 5, 8, 6, 13, 7, 21, 8, 34, 9, 55, def F(n): if n == 0: return 0; elif n == 1: return 1; else: return F(n-1)+F(n-2)
+0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 5, 8, 6, 13, 7, 21, 8, 34, 9, 55, def F(n): if n == 0: return 0; elif n == 1: return 1; else: return F(n-1)+F(n-2)
+0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 5, 8, 6, 13, 7, 21, 8, 34, 9, 55, def F(n): if n == 0: return 0; elif n == 1: return 1; else: return F(n-1)+F(n-2)
+0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 5, 8, 6, 13, 7, 21, 8, 34, 9, 55, def F(n): if n == 0: return 0; elif n == 1: return 1; else: return F(n-1)+F(n-2)
