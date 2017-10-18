@@ -23,4 +23,4 @@ In order to fully realize the problems and assumptions made by prior approaches 
 # 5 - Problems and Assumptions
 The primary problem existing with programming by example methods for neural program induction is that the required amount of different examples for complex programs can become intractable quickly, and even more so when performing training on that data. Programming by example methods for neural program synthesis require significantly less data to generate functioning programs, however, the complexity of programs is limited by the number of accessible base functions. More recently, synthesis methods that allow for base functions to be learned explicitly solve this problem, but assume a latent representation of final program behavior, and of program syntax. We hypothesize that learning complex programs becomes an easier task when representations for both program behavior and program syntax are made explicit.
 
-*Research Idea by Brandon Trabucco, with collaboration from Ani Nrushima and Ho Yin Chao*
+<p align="center">*Research Idea by Brandon Trabucco, with collaboration from Ani Nrushima and Ho Yin Chao*</p>
