@@ -108,7 +108,7 @@ def training_batch_python():
     # Combine example queue into batch
     name_batch, examples_batch, program_batch = generate_batch(name, examples, program)
 
-    return name, examples, program
+    return name_batch, examples_batch, program_batch
 
 
 # Create new graph
