@@ -111,12 +111,117 @@ def training_batch_python():
     return name_batch, examples_batch, program_batch
 
 
+# Prefix model nomenclature
+PREFIX_RNN = "rnn"
+PREFIX_DENSE = "dense"
+PREFIX_SOFTMAX = "softmax"
+PREFIX_TOTAL = "total"
+
+
+# Extension model nomenclature
+EXTENSION_NUMBER = (lambda number: "_" + str(number))
+EXTENSION_LOSS = "_loss"
+EXTENSION_WEIGHTS = "_weights"
+EXTENSION_BIASES = "_biases"
+EXTENSION_OFFSET = "_offset"
+EXTENSION_SCALE = "_scale"
+EXTENSION_ACTIVATION = "_activation"
+EXTENSION_COLUMN = "_column"
+
+
+# Collection model nomenclature
+COLLECTION_LOSSES = "losses"
+COLLECTION_PARAMETERS = "parameters"
+COLLECTION_ACTIVATIONS = "activations"
+
+
+# Initialize trainable parameters
+def initialize_weights_cpu(name, shape, standard_deviation=0.01, decay_factor=None):
+
+    # Force usage of cpu
+    with tf.device("/cpu:0"):
+
+        # Sample weights from normal distribution
+        weights = tf.get_variable(
+            name,
+            shape, 
+            initializer=tf.truncated_normal_initializer(
+                stddev=standard_deviation,
+                dtype=tf.float32),
+            dtype=tf.float32)
+
+    # Add weight decay to loss function
+    if decay_factor is not None:
+
+        # Calculate decay with l2 loss
+        weight_decay = tf.multiply(
+            tf.nn.l2_loss(weights), 
+            decay_factor, 
+            name=(name + EXTENSION_LOSS))
+        tf.add_to_collection(COLLECTION_LOSSES, weight_decay)
+
+    return weights
+
+
+# Initialize trainable parameters
+def initialize_biases_cpu(name, shape):
+
+    # Force usage of cpu
+    with tf.device("/cpu:0"):
+
+        # Sample weights from normal distribution
+        biases = tf.get_variable(
+            name,
+            shape, 
+            initializer=tf.constant_initializer(1.0),
+            dtype=tf.float32)
+
+    return biases
+
+
+# Compute corrected tokenized code with rnn
+def inference_generator_python(program_batch):
+
+    return program_batch
+
+
+# Compute behavior function with rnn
+def inference_behavior_python(program_batch):
+
+    # Compute expected output given input example
+    def behavior_function(input_example):
+
+        return input_example
+
+    return behavior_function
+
+
+# Compute syntax label with rnn
+def inference_syntax_python(program_batch):
+
+    return tf.constant([1.], dtype=tf.float32)
+
+
 # Create new graph
 with tf.Graph().as_default():
 
+    # Compute single training batch
     name_batch, examples_batch, program_batch = training_batch_python()
+
+
+    # Compute corrected code
+    corrected_batch = inference_generator_python(program_batch)
+
+    
+    # Compute syntax of corrected code
+    syntax_batch = inference_syntax_python(corrected_batch)
+
+
+    # Compute behavior of corrected code
+    behavior_batch = inference_behavior_python(corrected_batch)
+
 
     with tf.train.MonitoredTrainingSession() as session:
 
-        output = session.run(name_batch)
+        output = session.run(corrected_batch)
         print(output)
