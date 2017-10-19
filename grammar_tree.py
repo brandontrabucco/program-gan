@@ -1,12 +1,27 @@
+import multiprocessing as mp
+
+
+# Keep track of free cpu cores
+CPU_CORES = 8
+
+
+# Number of operations to chain
+RECURSION_DEPTH = 8
+
+
+# Open dataset file write stream
+DATASET_FILE = open("dataset.csv", "w")
+
+
 # Convert string programs to executable function
-PROGRAM_FORMAT = (lambda program: "(lambda x: {0})".format(program))
-PROGRAM_LIST = ["x"]
+PROGRAM_LIST = ["lambda x: x"]
 
 
 # Reset program list for next cycle
 def clear_programs():
     PROGRAM_LIST.clear()
-    PROGRAM_LIST.append("x")
+    PROGRAM_LIST.append("lambda x: x")
+    DATASET_FILE.truncate()
 
 
 # Allowed modifications to existing programs
@@ -23,47 +38,52 @@ def mutate_program(current_program, recursive_depth):
         # Mutate existing code
         new_program = current_program + mutation
 
+
         # Mutate already mutated code
         if recursive_depth > 0:
             mutate_program(new_program, recursive_depth - 1)
+
 
         # Save mutated code an program example
         PROGRAM_LIST.append(new_program)
 
 
-# COstruct a tree of given depth using mutate_program, and render dataset csv
-def construct_tree(recursive_depth):
+# Function to render dataet line with multiprocessing
+def render_program(current_program):
 
-    # Clear existing programs from list
-    clear_programs()
+    # Evaluate program into function F
+    F = eval(current_program)
 
-    # Query the initial program, identity function
-    original_program = PROGRAM_LIST[0]
 
-    # Mutate existing program recursively, and generate tree
-    mutate_program(original_program, recursive_depth)
+    # Encode column one: name
+    current_line = "grammer_tree_program" + ", "
 
-    # Render programs to dataset csv
-    with open("dataset.csv", "w") as output_file:
 
-        # Render every program in list
-        for i in range(len(PROGRAM_LIST)):
+    # Encode columns two through twenty-one: IO examples
+    for n in range(10):
+        current_line += str(n) + ", " + str(F(n)) + ", "
 
-            # Translate program to executable format
-            current_program = PROGRAM_FORMAT(PROGRAM_LIST[i])
 
-            # Evaluate program into function F
-            F = eval(current_program)
+    # Encode final column: source code
+    current_line += current_program + "\n"
 
-            # Encode column one: name
-            current_line = "grammer_tree_program_" + str(i) + ", "
 
-            # Encode columns two through twenty-one: IO examples
-            for n in range(10):
-                current_line += str(n) + ", " + str(F(n)) + ", "
+    # Write line to dataset csv file
+    DATASET_FILE.write(current_line)
 
-            # Encode final column: source code
-            current_line += current_program + "\n"
 
-            # Write line to dataset csv file
-            output_file.write(current_line)
+# Clear existing programs from list
+clear_programs()
+
+
+# Mutate existing program recursively, and generate tree
+mutate_program(PROGRAM_LIST[0], RECURSION_DEPTH)
+
+
+if __name__ == "__main__":
+
+    # Create a handle with multiple cores
+    multi_core = mp.Pool(CPU_CORES)
+
+    # Execute render function on every program
+    multi_core.map(render_program, PROGRAM_LIST)
