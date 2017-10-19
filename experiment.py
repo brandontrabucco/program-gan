@@ -10,9 +10,14 @@ PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/" +
 CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
 
 
+# The location on the disk of project
+DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
+    "Academic/Research/Program Synthesis with Deep Learning/Datasets/")
+
+
 # Filenames associated with program dataset
 DATASET_FILENAMES_PYTHON = [
-    (PROJECT_BASEDIR + "dataset.csv")
+    (DATASET_BASEDIR + "dataset.csv")
 ]
 
 
