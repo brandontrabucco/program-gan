@@ -1,7 +1,9 @@
-<p align="center"><img src="https://www.lucidchart.com/publicSegments/view/7eba83d0-9717-482f-8957-c2343f598a3d/image.jpeg" height="400"/></p>
-
 # <p align="center">1 - Abstract</p>
 Automated composition of computer programs has been a standing challenge since the early days of artificial intelligence, and has no clear solutions with modern-day research in deep learning. Indeed, modeling latent context representations in language proves to be a difficult task singularly, and combined with applying structured procedural knowledge in a generative fashion quickly becomes intractable for complex domain specific languages. There is a clear need for research in devising efficiently learned combinations of these independent problems. We investigate the nature of such an architecture, and determine the current assumptions and limitations made by previous attempts at neural program synthesis. From our observations, we propose an architecture using the recent Generative Adversarial Networks and Hyper Networks to generate syntactically correct and behaviorally useful python source code from input and output examples, pseudocode, or even erroneous existing code.
+
+<p align="center"><img src="https://www.lucidchart.com/publicSegments/view/7eba83d0-9717-482f-8957-c2343f598a3d/image.jpeg" height="400"/></p>
+
+*<p align="center">Figure One: Program GAN Computation Graph</p>*
 
 # <p align="center">2 - Introduction</p>
 ## Motivation for our Research.
@@ -23,4 +25,4 @@ In order to fully realize the problems and assumptions made by prior approaches 
 # <p align="center">5 - Problems and Assumptions</p>
 The primary problem existing with programming by example methods for neural program induction is that the required amount of different examples for complex programs can become intractable quickly, and even more so when performing training on that data. Programming by example methods for neural program synthesis require significantly less data to generate functioning programs, however, the complexity of programs is limited by the number of accessible base functions. More recently, synthesis methods that allow for base functions to be learned explicitly solve this problem, but assume a latent representation of final program behavior, and of program syntax. We hypothesize that learning complex programs becomes an easier task when representations for both program behavior and program syntax are made explicit.
 
-*<p align="center">Research Idea by Brandon Trabucco, with collaboration from Ani Nrushima and Ho Yin Chau</p>*
+*<p align="center">Idea by Brandon Trabucco on 2017.09.27, with collaboration from Ani Nrushima and Ho Yin Chau</p>*
