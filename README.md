@@ -3,6 +3,8 @@ Automated composition of computer programs has been a standing challenge since t
 
 <p align="center"><img src="https://www.lucidchart.com/publicSegments/view/7eba83d0-9717-482f-8957-c2343f598a3d/image.jpeg" height="400"/></p>
 
+*<p align="center">Figure One: Program GAN Computation Graph</p>*
+
 # <p align="center">2 - Introduction</p>
 ## Motivation for our Research.
 There a number of reasons outside of  the scientific domain that motivate research in the problem of neural program synthesis. The most obvious motivator is the ability reduce the amount of time required to develop large programs that make heavy use of APIs for file conversion, handling http requests, and even data analytics. An amount of time saved by developers in a company has a proportional amount of income to be saved. Multiplied across dozens of software developers in a single firm, savings figures quickly measure in the hundreds of thousands over the course of a single business year. A second obvious motivator is a reduction in the knowledge barrier for scientific computing, which can be argued to increase innovation trends and education standards, which induce higher productivity in research and industry. From a more theoretical perspective, the difference between neural program synthesis, and neural question answering is a matter of dataset choice. Our research will bring deeper insight to general natural language understanding.
