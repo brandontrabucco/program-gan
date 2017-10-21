@@ -65,6 +65,10 @@ DATASET_HEADER = ("function_name" +
 DATASET_ENTRIES = ["lambda x: x"]
 
 
+# Number of IO examples per dataset row
+DATASET_IO_EXAMPLES = 10
+
+
 # Keep track of current row in dataset
 CURSOR_INDEX = 0
 
@@ -128,7 +132,7 @@ def render_program(current_program):
 
 
     # Encode columns two through twenty-one: IO examples
-    for n in range(10):
+    for n in range(DATASET_IO_EXAMPLES):
         current_line += str(n) + DATASET_DELIMINATOR + str(F(n)) + DATASET_DELIMINATOR
 
 
