@@ -19,13 +19,18 @@ CPU_CORES = 8
 RECURSION_DEPTH = 8
 
 
+
+# Number of IO examples per dataset row
+DATASET_IO_EXAMPLES = 10
+
+
 # The location on the disk of project
 DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
     "Academic/Research/Program Synthesis with Deep Learning/Datasets/")
 
 
 # Path to dataset file
-DATASET_FILEPATH = DATASET_BASEDIR + "dataset.csv"
+DATASET_FILEPATH = (DATASET_BASEDIR + "dataset.csv")
 
 
 # Open dataset file write stream
@@ -36,37 +41,23 @@ DATASET_FILE = open(DATASET_FILEPATH, "w")
 DATASET_DELIMINATOR = ", "
 
 
-# Header to dataset csv file
-DATASET_HEADER = ("function_name" + 
-    DATASET_DELIMINATOR + "function_input_0" + 
-    DATASET_DELIMINATOR + "function_output_0" + 
-    DATASET_DELIMINATOR + "function_input_1" + 
-    DATASET_DELIMINATOR + "function_output_1" + 
-    DATASET_DELIMINATOR + "function_input_2" + 
-    DATASET_DELIMINATOR + "function_output_2" + 
-    DATASET_DELIMINATOR + "function_input_3" + 
-    DATASET_DELIMINATOR + "function_output_3" + 
-    DATASET_DELIMINATOR + "function_input_4" + 
-    DATASET_DELIMINATOR + "function_output_4" + 
-    DATASET_DELIMINATOR + "function_input_5" + 
-    DATASET_DELIMINATOR + "function_output_5" + 
-    DATASET_DELIMINATOR + "function_input_6" + 
-    DATASET_DELIMINATOR + "function_output_6" + 
-    DATASET_DELIMINATOR + "function_input_7" + 
-    DATASET_DELIMINATOR + "function_output_7" + 
-    DATASET_DELIMINATOR + "function_input_8" + 
-    DATASET_DELIMINATOR + "function_output_8" + 
-    DATASET_DELIMINATOR + "function_input_9" + 
-    DATASET_DELIMINATOR + "function_output_9" + 
-    DATASET_DELIMINATOR + "function_code")
+# First column of dataset header
+DATASET_HEADER = "function_name"
+
+
+# Add two header columns for each IO example
+for i in range(DATASET_IO_EXAMPLES):
+    DATASET_HEADER += (DATASET_DELIMINATOR + "function_input_" + str(i) + 
+    DATASET_DELIMINATOR + "function_output_" + str(i))
+
+
+
+# Final column of dataset header
+DATASET_HEADER += (DATASET_DELIMINATOR + "function_code")
 
 
 # Convert string programs to executable function
 DATASET_ENTRIES = ["lambda x: x"]
-
-
-# Number of IO examples per dataset row
-DATASET_IO_EXAMPLES = 10
 
 
 # Keep track of current row in dataset
