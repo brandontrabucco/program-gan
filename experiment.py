@@ -41,7 +41,7 @@ DATASET_MAXIMUM = 64
 
 # Convert elements of python source code to one-hot token vectors
 def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULARY):
-    
+
     # List allowed characters
     mapping_characters = tf.string_split([vocabulary], delimiter="")
 
@@ -178,7 +178,7 @@ def initialize_weights_cpu(name, shape, standard_deviation=0.01, decay_factor=No
         # Sample weights from normal distribution
         weights = tf.get_variable(
             name,
-            shape, 
+            shape,
             initializer=tf.truncated_normal_initializer(
                 stddev=standard_deviation,
                 dtype=tf.float32),
@@ -189,8 +189,8 @@ def initialize_weights_cpu(name, shape, standard_deviation=0.01, decay_factor=No
 
         # Calculate decay with l2 loss
         weight_decay = tf.multiply(
-            tf.nn.l2_loss(weights), 
-            decay_factor, 
+            tf.nn.l2_loss(weights),
+            decay_factor,
             name=(name + EXTENSION_LOSS))
         tf.add_to_collection(COLLECTION_LOSSES, weight_decay)
 
@@ -206,7 +206,7 @@ def initialize_biases_cpu(name, shape):
         # Sample weights from normal distribution
         biases = tf.get_variable(
             name,
-            shape, 
+            shape,
             initializer=tf.constant_initializer(1.0),
             dtype=tf.float32)
 
@@ -236,28 +236,170 @@ def inference_syntax_python(program_batch):
     return tf.constant([1.], dtype=tf.float32)
 
 
-# Create new graph
-with tf.Graph().as_default():
+# Compute loss for syntax discriminator
+def loss(prediction, labels):
 
-    # Compute single training batch
-    name_batch, examples_batch, program_batch, length_batch = training_batch_python()
-
-
-    # Compute corrected code
-    corrected_batch = inference_generator_python(program_batch)
-
-    
-    # Compute syntax of corrected code
-    syntax_batch = inference_syntax_python(corrected_batch)
+    # Calculate huber loss of prediction
+    huber_loss = tf.losses.huber_loss(labels, prediction)
 
 
-    # Compute behavior of corrected code
-    behavior_batch = inference_behavior_python(corrected_batch)
+    # Calculate the mean loss across batch
+    huber_loss_mean = tf.reduce_mean(huber_loss, name=())
+    tf.add_to_collection(COLLECTION_LOSSES, huber_loss_mean)
+
+    return tf.add_n(tf.get_collection(COLLECTION_LOSSES), name=(PREFIX_TOTAL + EXTENSION_LOSS))
 
 
-    # Perform computation cycle based on graph
-    with tf.train.MonitoredTrainingSession() as session:
+# Hyperparameters
+INITIAL_LEARNING_RATE = 0.001
+DECAY_STEPS = 10 * EPOCH_SIZE
+DECAY_FACTOR = 0.95
 
-        # Calculate corrected batch source code
-        output = session.run(program_batch)
-        print(output)
+
+def train(total_loss):
+
+    # Keep track of current training step
+    global_step = tf.train.get_or_create_global_step()
+
+
+    # Decay learning rate
+    learning_rate = tf.train.exponential_decay(
+        INITIAL_LEARNING_RATE,
+        global_step,
+        DECAY_STEPS,
+        DECAY_FACTOR,
+        staircase=True)
+
+
+    # Create optimizer for gradient updates
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+
+
+    # Minimize loss using optimizer
+    gradient = optimizer.minimize(total_loss, global_step=global_step)
+
+    return gradient
+
+
+# Calculate number batches per single epoch
+EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
+
+
+# Run single training cycle on dataset
+def train_epf_8(num_steps=1):
+
+    # Watch compute time per batch
+    from time import time
+    from datetime import datetime
+
+
+    # Convert epoch to batch steps
+    num_steps = num_epoch * EPOCH_SIZE
+
+
+    # Create new graph
+    with tf.Graph().as_default():
+
+        # Compute single training batch
+        name_batch, examples_batch, program_batch, length_batch = training_batch_python()
+
+
+        # Compute corrected code
+        corrected_batch = inference_generator_python(program_batch)
+
+
+        # Compute syntax of corrected code
+        syntax_batch = inference_syntax_python(corrected_batch)
+        syntax_loss = loss(syntax_batch, tf.constant([1. for _ in range(BATCH_SIZE)], tf.float32))
+
+
+        # Compute behavior of corrected code
+        behavior_batch = inference_behavior_python(corrected_batch)
+        behavior_loss = []
+        for n in range(DATASET_IO_EXAMPLES)
+            input_example = tf.constant([n], tf.float32)
+            output_prediction = behavior_batch(tf.constant([n], tf.float32))
+            behavior_loss.append(loss(output_prediction, input_example))
+
+
+        # Obtain total loss of entire model
+        total_loss = tf.get_collection(COLLECTION_LOSSES)
+        gradient_batch = train(total_loss)
+
+
+        # Store datapoints each epoch for plot
+        data_points = []
+
+
+        # Report testing progress
+        class LogProgressHook(tf.train.SessionRunHook):
+
+            # Session is initialized
+            def begin(self):
+                self.current_step = 0
+                self.batch_speed = 0
+
+
+            # Just before inference
+            def before_run(self, run_context):
+                self.current_step += 1
+                self.start_time = time()
+                return tf.train.SessionRunArgs([syntax_batch, syntax_loss])
+
+
+            # Just after inference
+            def after_run(self, run_context, run_values):
+
+                # Calculate weighted speed
+                self.batch_speed = (0.2 * self.batch_speed) + (0.8 * (1.0 / (time() - self.start_time + 1e-7)))
+
+
+                # Update every period of steps
+                if (self.current_step % EPOCH_SIZE == 0):
+
+                    # Obtain graph results
+                    syntax_value, loss_value = run_values.results
+
+
+                    # Perform some computation, e.g. export a plot, or calculate accuracy
+                    average_score = tf.reduce_mean(syntax_value)
+
+
+                    # Display date, batch speed, estimated time, loss, and accuracy
+                    print(
+                        datetime.now(),
+                        "CUR: %d" % self.current_step,
+                        "REM: %d" % (num_steps - self.current_step),
+                        "SPD: %.2f bat/sec" % self.batch_speed,
+                        "ETA: %.2f hrs" % ((num_steps - self.current_step) / self.batch_speed / 60 / 60),
+                        "L: %.2f" % loss_value)
+
+
+                    # Record current loss
+                    data_points.append(loss_value)
+
+
+        # Prepare to save and load models
+        model_saver = tf.train.Saver()
+
+
+        # Perform computation cycle based on graph
+        with tf.train.MonitoredTrainingSession(hooks=[
+            tf.train.StopAtStepHook(num_steps=num_steps),
+            tf.train.CheckpointSaverHook(CHECKPOINT_BASEDIR, save_steps=EPOCH_SIZE, saver=model_saver),
+            LogProgressHook()]) as session:
+
+            # Repeat training iteratively
+            while not session.should_stop():
+
+                # Run single batch of training
+                session.run(gradient_batch)
+
+
+     # Construct and save plot
+    import matplotlib.pyplot as plt
+    plt.plot(data_points)
+    plt.xlabel("Training Epoch")
+    plt.ylabel("Mean Huber Syntax Loss")
+    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
+    plt.close()
