@@ -1,4 +1,5 @@
 import tensorflow as tf
+import string as sn
 
 
 # The location on the disk of project
@@ -33,10 +34,38 @@ DATASET_COLUMNS = (DATASET_IO_EXAMPLES * 2) + 2
 DATASET_DEFAULT = "0"
 
 
-# Convert elements of python source code to one-hot token vectors
-def tokenize_source_code_python(source_code_python):
+# Tokenization parameters for python
+DATASET_VOCABULARY = sn.printable
+DATASET_MAXIMUM = 64
 
-    return source_code_python
+
+# Convert elements of python source code to one-hot token vectors
+def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULARY):
+    
+    # List allowed characters
+    mapping_characters = tf.string_split([vocabulary], delimiter="")
+
+
+    # List characters in each word
+    input_characters = tf.string_split([source_code_python], delimiter="")
+
+
+    # Convert integer lookup table
+    lookup_table = tf.contrib.lookup.index_table_from_tensor(mapping=mapping_characters.values, default_value=0)
+
+
+    # Query lookup table
+    one_hot_tensor = tf.one_hot(lookup_table.lookup(input_characters.values), len(vocabulary), dtype=tf.float32)
+
+
+    # Calculate actual sequence length
+    actual_length = tf.size(one_hot_tensor) // len(vocabulary)
+
+
+    # Pad input to match DATASET_MAXIMUM
+    expanded_tensor = tf.pad(one_hot_tensor, [[0, (DATASET_MAXIMUM - actual_length)], [0, 0]])
+
+    return tf.reshape(expanded_tensor, [DATASET_MAXIMUM, len(vocabulary)]), actual_length
 
 
 # Read single row words
@@ -59,43 +88,43 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
 
 
     # Convert python code to tokenized one-hot vectors
-    function_column = tokenize_source_code_python(function_column)
+    program_tensor, actual_length = tokenize_source_code_python(function_column)
 
-    return name_column, example_columns, function_column
+    return name_column, example_columns, program_tensor, actual_length
 
 
 # Batch configuration constants
 BATCH_SIZE = 32
 NUM_THREADS = 4
-TOTAL_EXAMPLES = 150
+TOTAL_EXAMPLES = 2015538
 
 
 # Generate batch from rows
-def generate_batch(name, examples, program, batch_size=BATCH_SIZE, num_threads=NUM_THREADS, shuffle_batch=True):
+def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_threads=NUM_THREADS, shuffle_batch=True):
 
     # Shuffle batch randomly
     if shuffle_batch:
 
         # Construct batch from queue of records
-        name_batch, examples_batch, program_batch = tf.train.shuffle_batch(
-            [name, examples, program],
+        name_batch, examples_batch, program_batch, length_batch = tf.train.shuffle_batch(
+            [name, examples, program, length],
             batch_size=batch_size,
             num_threads=num_threads,
             capacity=TOTAL_EXAMPLES,
-            min_after_dequeue=(TOTAL_EXAMPLES // 50))
+            min_after_dequeue=(TOTAL_EXAMPLES // 1000))
 
 
     # Preserve order of batch
     else:
 
         # Construct batch from queue of records
-        name_batch, examples_batch, program_batch = tf.train.batch(
-            [name, examples, program],
+        name_batch, examples_batch, program_batch, length_batch = tf.train.batch(
+            [name, examples, program, length],
             batch_size=batch_size,
             num_threads=num_threads,
             capacity=TOTAL_EXAMPLES)
 
-    return name_batch, examples_batch, program_batch
+    return name_batch, examples_batch, program_batch, length_batch
 
 
 
@@ -107,13 +136,13 @@ def training_batch_python():
 
 
     # Decode from string to floating point
-    name, examples, program = decode_record_python(filename_queue)
+    name, examples, program, length = decode_record_python(filename_queue)
 
 
     # Combine example queue into batch
-    name_batch, examples_batch, program_batch = generate_batch(name, examples, program)
+    name_batch, examples_batch, program_batch, length_batch = generate_batch(name, examples, program, length)
 
-    return name_batch, examples_batch, program_batch
+    return name_batch, examples_batch, program_batch, length_batch
 
 
 # Prefix model nomenclature
@@ -211,7 +240,7 @@ def inference_syntax_python(program_batch):
 with tf.Graph().as_default():
 
     # Compute single training batch
-    name_batch, examples_batch, program_batch = training_batch_python()
+    name_batch, examples_batch, program_batch, length_batch = training_batch_python()
 
 
     # Compute corrected code
@@ -226,7 +255,9 @@ with tf.Graph().as_default():
     behavior_batch = inference_behavior_python(corrected_batch)
 
 
+    # Perform computation cycle based on graph
     with tf.train.MonitoredTrainingSession() as session:
 
-        output = session.run(corrected_batch)
+        # Calculate corrected batch source code
+        output = session.run(program_batch)
         print(output)

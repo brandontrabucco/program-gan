@@ -1,14 +1,5 @@
-import multiprocessing as mp
-import threading as td
-
-	
-# Force function to block single threads
-def synchronized(function_to_block):
-    function_to_block.__lock__ = td.Lock()
-    def blocking_function(*args, **kws):
-        with function_to_block.__lock__:
-            return function_to_block(*args, **kws)
-    return blocking_function
+# Track number of entries in dataset file
+DATASET_LENGTH = 2015538
 
 
 # Keep track of free cpu cores
@@ -17,7 +8,6 @@ CPU_CORES = 8
 
 # Number of operations to chain
 RECURSION_DEPTH = 8
-
 
 
 # Number of IO examples per dataset row
@@ -56,8 +46,8 @@ for i in range(DATASET_IO_EXAMPLES):
 DATASET_HEADER += (DATASET_DELIMINATOR + "function_code")
 
 
-# Convert string programs to executable function
-DATASET_ENTRIES = ["lambda x: x"]
+# Initial program to mutate from
+DATASET_SEED = "lambda x: x"
 
 
 # Keep track of current row in dataset
@@ -66,25 +56,8 @@ CURSOR_INDEX = 0
 
 # Reset program list for next cycle
 def clear_programs():
-    DATASET_ENTRIES.clear()
-    DATASET_ENTRIES.append("lambda x: x")
     DATASET_FILE.truncate()
-    insert_row_dataset(DATASET_HEADER)
-    CURSOR_INDEX = 0
-
-
-# Track current row index in dataset file
-@synchronized
-def increment_cursor():
-    global CURSOR_INDEX
-    CURSOR_INDEX += 1
-    return (CURSOR_INDEX - 1)
-
-
-# Write single line to dataset csv file
-@synchronized
-def insert_row_dataset(row_to_insert):
-    DATASET_FILE.write(row_to_insert + "\n")
+    DATASET_FILE.write(DATASET_HEADER + "\n")
 
 
 # Allowed modifications to existing programs
@@ -107,19 +80,24 @@ def mutate_program(current_program, recursive_depth):
             mutate_program(new_program, recursive_depth - 1)
 
 
-        # Save mutated code an program example
-        DATASET_ENTRIES.append(new_program)
+        # Save mutated code as program example
+        render_program(new_program)
 
 
 # Function to render dataset line with multiprocessing
 def render_program(current_program):
+
+    # Obntain current cursor position in file
+    global CURSOR_INDEX
+
 
     # Evaluate program into function F
     F = eval(current_program)
 
 
     # Encode column one: name
-    current_line = "math_function_" + str(increment_cursor()) + DATASET_DELIMINATOR
+    current_line = "math_function_" + str(CURSOR_INDEX) + DATASET_DELIMINATOR
+    CURSOR_INDEX += 1
 
 
     # Encode columns two through twenty-one: IO examples
@@ -132,7 +110,7 @@ def render_program(current_program):
 
 
     # Write line to dataset csv file
-    insert_row_dataset(current_line)
+    DATASET_FILE.write(current_line + "\n")
 
 
 # Clear existing programs from list
@@ -140,13 +118,4 @@ clear_programs()
 
 
 # Mutate existing program recursively, and generate tree
-mutate_program(DATASET_ENTRIES[0], RECURSION_DEPTH)
-
-
-if __name__ == "__main__":
-
-    # Create a handle with multiple cores
-    multi_core = mp.Pool(CPU_CORES)
-
-    # Execute render function on every program
-    multi_core.map(render_program, DATASET_ENTRIES)
+mutate_program(DATASET_SEED, RECURSION_DEPTH)
