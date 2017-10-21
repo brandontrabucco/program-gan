@@ -1,22 +1,29 @@
-# Track number of entries in dataset file
-DATASET_LENGTH = 2015538
+# Possible mutations to initial function
+DATASET_MUTATIONS = ["+1", "-1", "+x", "-x", "*(x+1)", "/(x+1)"]
+print("Allowed mutations:", DATASET_MUTATIONS)
 
 
 # Number of operations to chain
-RECURSION_DEPTH = 8
+RECURSION_DEPTH = 7
+print("Grammar tree depth:", RECURSION_DEPTH)
+
+
+# Track number of entries in dataset file
+DATASET_LENGTH = sum([len(DATASET_MUTATIONS)**(i + 1) for i in range(RECURSION_DEPTH)])
+print("Total number rows:", DATASET_LENGTH)
+
+
+# Initial program to mutate from
+DATASET_SEED = "lambda x: x"
+print("Initial function seed:", DATASET_SEED)
 
 
 # Number of IO examples per dataset row
 DATASET_IO_EXAMPLES = 10
 
 
-# The location on the disk of project
-DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Datasets/")
-
-
 # Path to dataset file
-DATASET_FILEPATH = (DATASET_BASEDIR + "epf_8_dataset.csv")
+DATASET_FILEPATH = ("epf_" + str(RECURSION_DEPTH) + "_dataset.csv")
 
 
 # Open dataset file write stream
@@ -37,13 +44,8 @@ for i in range(DATASET_IO_EXAMPLES):
     DATASET_DELIMINATOR + "function_output_" + str(i))
 
 
-
 # Final column of dataset header
 DATASET_HEADER += (DATASET_DELIMINATOR + "function_code")
-
-
-# Initial program to mutate from
-DATASET_SEED = "lambda x: x"
 
 
 # Keep track of current row in dataset
@@ -58,26 +60,28 @@ def clear_programs():
 
 # Allowed modifications to existing programs
 def possible_mutations(current_program):
-    return ["+1", "-1", "+x", "-x", "*(x+1)", "/(x+1)"]
+    return DATASET_MUTATIONS
 
 
 # Recursively mutate programs using tree
 def mutate_program(current_program, recursive_depth):
+    
+    # Check if enough mutations have been made
+    if recursive_depth > 0:
 
-    # Generate program for every allowed mutation
-    for mutation in possible_mutations(current_program):
+        # Generate program for every allowed mutation
+        for mutation in possible_mutations(current_program):
 
-        # Mutate existing code
-        new_program = current_program + mutation
+            # Mutate existing code
+            new_program = current_program + mutation
 
 
-        # Mutate already mutated code
-        if recursive_depth > 0:
+            # Mutate already mutated code
             mutate_program(new_program, recursive_depth - 1)
 
 
-        # Save mutated code as program example
-        render_program(new_program)
+            # Save mutated code as program example
+            render_program(new_program)
 
 
 # Function to render dataset line with multiprocessing
@@ -110,8 +114,11 @@ def render_program(current_program):
 
 
 # Clear existing programs from list
+print("Cleaning dataset file.")
 clear_programs()
 
 
 # Mutate existing program recursively, and generate tree
+print("Generating grammar tree.")
 mutate_program(DATASET_SEED, RECURSION_DEPTH)
+print("Finished.")
