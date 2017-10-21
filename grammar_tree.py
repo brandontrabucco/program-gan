@@ -2,10 +2,6 @@
 DATASET_LENGTH = 2015538
 
 
-# Keep track of free cpu cores
-CPU_CORES = 8
-
-
 # Number of operations to chain
 RECURSION_DEPTH = 8
 
@@ -20,7 +16,7 @@ DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
 
 
 # Path to dataset file
-DATASET_FILEPATH = (DATASET_BASEDIR + "dataset.csv")
+DATASET_FILEPATH = (DATASET_BASEDIR + "epf_8_dataset.csv")
 
 
 # Open dataset file write stream
