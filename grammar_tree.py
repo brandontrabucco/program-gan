@@ -4,7 +4,7 @@ print("Allowed mutations:", DATASET_MUTATIONS)
 
 
 # Number of operations to chain
-RECURSION_DEPTH = 7
+RECURSION_DEPTH = 10
 print("Grammar tree depth:", RECURSION_DEPTH)
 
 
