@@ -267,6 +267,7 @@ DECAY_STEPS = 10 * EPOCH_SIZE
 DECAY_FACTOR = 0.95
 
 
+# Compute loss gradient and update parameters
 def train(total_loss):
 
     # Keep track of current training step
