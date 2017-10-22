@@ -97,6 +97,7 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
 BATCH_SIZE = 32
 NUM_THREADS = 4
 TOTAL_EXAMPLES = 2015538
+EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
 
 
 # Generate batch from rows
@@ -150,6 +151,9 @@ PREFIX_RNN = "rnn"
 PREFIX_DENSE = "dense"
 PREFIX_SOFTMAX = "softmax"
 PREFIX_TOTAL = "total"
+PREFIX_GENERATOR = "generator"
+PREFIX_SYNTAX = "syntax"
+PREFIX_BEHAVIOR = "behavior"
 
 
 # Extension model nomenclature
@@ -216,16 +220,23 @@ def initialize_biases_cpu(name, shape):
 # Compute corrected tokenized code with rnn
 def inference_generator_python(program_batch):
 
-    return program_batch
+    # Placeholder weights for computation check
+    generator_weights = initialize_weights_cpu((PREFIX_GENERATOR + EXTENSION_WEIGHTS), program_batch.shape)
+
+    return program_batch * generator_weights
 
 
 # Compute behavior function with rnn
 def inference_behavior_python(program_batch):
 
+    # Placeholder weights for computation check
+    behavior_weights = initialize_weights_cpu((PREFIX_BEHAVIOR + EXTENSION_WEIGHTS), [BATCH_SIZE])
+
+
     # Compute expected output given input example
     def behavior_function(input_example):
 
-        return input_example
+        return input_example * behavior_weights
 
     return behavior_function
 
@@ -233,7 +244,7 @@ def inference_behavior_python(program_batch):
 # Compute syntax label with rnn
 def inference_syntax_python(program_batch):
 
-    return tf.constant([1.], dtype=tf.float32)
+    return tf.constant([1. for _ in range(BATCH_SIZE)], dtype=tf.float32)
 
 
 # Compute loss for syntax discriminator
@@ -244,10 +255,10 @@ def loss(prediction, labels):
 
 
     # Calculate the mean loss across batch
-    huber_loss_mean = tf.reduce_mean(huber_loss, name=())
+    huber_loss_mean = tf.reduce_mean(huber_loss)
     tf.add_to_collection(COLLECTION_LOSSES, huber_loss_mean)
 
-    return tf.add_n(tf.get_collection(COLLECTION_LOSSES), name=(PREFIX_TOTAL + EXTENSION_LOSS))
+    return huber_loss_mean
 
 
 # Hyperparameters
@@ -281,12 +292,8 @@ def train(total_loss):
     return gradient
 
 
-# Calculate number batches per single epoch
-EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
-
-
 # Run single training cycle on dataset
-def train_epf_8(num_steps=1):
+def train_epf_8(num_epoch=1):
 
     # Watch compute time per batch
     from time import time
@@ -316,14 +323,15 @@ def train_epf_8(num_steps=1):
         # Compute behavior of corrected code
         behavior_batch = inference_behavior_python(corrected_batch)
         behavior_loss = []
-        for n in range(DATASET_IO_EXAMPLES)
-            input_example = tf.constant([n], tf.float32)
-            output_prediction = behavior_batch(tf.constant([n], tf.float32))
+        for n in range(DATASET_IO_EXAMPLES):
+            input_example = tf.constant([n for _ in range(BATCH_SIZE)], tf.float32)
+            output_prediction = behavior_batch(input_example)
             behavior_loss.append(loss(output_prediction, input_example))
+        behavior_loss = tf.stack(behavior_loss)
 
 
         # Obtain total loss of entire model
-        total_loss = tf.get_collection(COLLECTION_LOSSES)
+        total_loss = tf.add_n(tf.get_collection(COLLECTION_LOSSES), name=(PREFIX_TOTAL + EXTENSION_LOSS))
         gradient_batch = train(total_loss)
 
 
@@ -386,7 +394,9 @@ def train_epf_8(num_steps=1):
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
             tf.train.StopAtStepHook(num_steps=num_steps),
-            tf.train.CheckpointSaverHook(CHECKPOINT_BASEDIR, save_steps=EPOCH_SIZE, saver=model_saver),
+            tf.train.CheckpointSaverHook(CHECKPOINT_BASEDIR,
+                save_steps=EPOCH_SIZE,
+                saver=model_saver),
             LogProgressHook()]) as session:
 
             # Repeat training iteratively
