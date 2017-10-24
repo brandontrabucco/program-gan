@@ -3,8 +3,7 @@ import string as sn
 
 
 # The location on the disk of project
-PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Repo/program-gan/")
+PROJECT_BASEDIR = ("/home/ani/Projects/program-gan/")
 
 
 # The location on the disk of checkpoints
@@ -12,8 +11,7 @@ CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
 
 
 # The location on the disk of project
-DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Datasets/")
+DATASET_BASEDIR = PROJECT_BASEDIR
 
 
 # Filenames associated with program dataset
@@ -264,6 +262,7 @@ def inference_syntax_python(program_batch, program_batch_code_length):
     softmax_w = tf.get_variable("softmax_w", [2*lstm_size, 1], dtype = tf.float32)
     softmax_b = tf.get_variable("softmax_b", [1], dtype = tf.float32) 
     logits = tf.nn.xw_plus_b(cell_states, softmax_w, softmax_b)
+    logits = tf.reshape(logits,[32])
 
     #returns a [batch_size] size vector with the probability that each batch has syntax errors
     return logits
@@ -339,7 +338,7 @@ def train_epf_8(num_epoch=1):
 
 
         # Compute syntax of corrected code
-        syntax_batch = inference_syntax_python(corrected_batch)
+        syntax_batch = inference_syntax_python(corrected_batch, length_batch)
         syntax_loss = loss(syntax_batch, tf.constant([1. for _ in range(BATCH_SIZE)], tf.float32))
 
 
