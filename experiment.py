@@ -3,8 +3,7 @@ import string as sn
 
 
 # The location on the disk of project
-PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Repo/program-gan/")
+PROJECT_BASEDIR = ("/home/ani/Projects/program-gan/" )
 
 
 # The location on the disk of checkpoints
@@ -12,8 +11,7 @@ CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
 
 
 # The location on the disk of project
-DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Datasets/")
+DATASET_BASEDIR = PROJECT_BASEDIR
 
 
 # Filenames associated with program dataset
