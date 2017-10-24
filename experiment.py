@@ -3,8 +3,7 @@ import string as sn
 
 
 # The location on the disk of project
-PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Repo/program-gan/")
+PROJECT_BASEDIR = ("/home/ani/Projects/program-gan/")
 
 
 # The location on the disk of checkpoints
@@ -12,8 +11,7 @@ CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
 
 
 # The location on the disk of project
-DATASET_BASEDIR = ("C:/Users/brand/Google Drive/" +
-    "Academic/Research/Program Synthesis with Deep Learning/Datasets/")
+DATASET_BASEDIR = PROJECT_BASEDIR
 
 
 # Filenames associated with program dataset
@@ -241,10 +239,33 @@ def inference_behavior_python(program_batch):
     return behavior_function
 
 
-# Compute syntax label with rnn
-def inference_syntax_python(program_batch):
+# Compute syntax label with brnn
+def inference_syntax_python(program_batch, program_batch_code_length):
+    input_batch = tf.identity(program_batch)
 
-    return tf.constant([1. for _ in range(BATCH_SIZE)], dtype=tf.float32)
+    lstm_size = len(DATASET_VOCABULARY) * 2
+
+
+    lstm_forward = tf.contrib.rnn.LSTMCell(lstm_size)
+    lstm_backward = tf.contrib.rnn.LSTMCell(lstm_size)
+    initial_state = tf.zeros([BATCH_SIZE, lstm_size])
+
+    outputs, states = tf.nn.bidirectional_dynamic_rnn(lstm_forward, lstm_backward, input_batch,
+            #initial_state_fw =initial_state, initial_state_bw = initial_state
+            #When I did this, I encountered an error that Tensors were not iterable.
+            dtype = tf.float32,
+            sequence_length = program_batch_code_length)
+
+    #Takes the two final cell states and softmaxes them
+    cell_states = tf.concat([states[0].c, states[1].c], 1)
+    print(cell_states.shape)
+    softmax_w = tf.get_variable("softmax_w", [2*lstm_size, 1], dtype = tf.float32)
+    softmax_b = tf.get_variable("softmax_b", [1], dtype = tf.float32) 
+    logits = tf.nn.xw_plus_b(cell_states, softmax_w, softmax_b)
+    logits = tf.reshape(logits,[32])
+
+    #returns a [batch_size] size vector with the probability that each batch has syntax errors
+    return logits
 
 
 # Compute loss for syntax discriminator
@@ -317,7 +338,7 @@ def train_epf_8(num_epoch=1):
 
 
         # Compute syntax of corrected code
-        syntax_batch = inference_syntax_python(corrected_batch)
+        syntax_batch = inference_syntax_python(corrected_batch, length_batch)
         syntax_loss = loss(syntax_batch, tf.constant([1. for _ in range(BATCH_SIZE)], tf.float32))
 
 
@@ -413,4 +434,3 @@ def train_epf_8(num_epoch=1):
     plt.xlabel("Training Epoch")
     plt.ylabel("Mean Huber Syntax Loss")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
-    plt.close()
