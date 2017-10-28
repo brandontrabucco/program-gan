@@ -3,7 +3,8 @@ import string as sn
 
 
 # The location on the disk of project
-PROJECT_BASEDIR = ("/home/ani/Projects/program-gan/")
+PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
+    "Program Synthesis with Deep Learning/Repo/program-gan/")
 
 
 # The location on the disk of checkpoints
@@ -11,7 +12,8 @@ CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
 
 
 # The location on the disk of project
-DATASET_BASEDIR = PROJECT_BASEDIR
+DATASET_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
+    "Program Synthesis with Deep Learning/Datasets/")
 
 
 # Filenames associated with program dataset
@@ -239,32 +241,32 @@ def inference_behavior_python(program_batch):
     return behavior_function
 
 
+# Hidden size of LSTM recurrent cell
+LSTM_SIZE = len(DATASET_VOCABULARY) * 2
+
+
 # Compute syntax label with brnn
-def inference_syntax_python(program_batch, program_batch_code_length):
-    input_batch = tf.identity(program_batch)
+def inference_syntax_python(program_batch, length_batch):
 
-    lstm_size = len(DATASET_VOCABULARY) * 2
+    # Define forward and backward rnn layers
+    lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+    lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+    
+    # Compute rnn activations
+    output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+        lstm_forward, 
+        lstm_backward, 
+        program_batch,
+        sequence_length=length_batch,
+        dtype=tf.float32)
 
 
-    lstm_forward = tf.contrib.rnn.LSTMCell(lstm_size)
-    lstm_backward = tf.contrib.rnn.LSTMCell(lstm_size)
-    initial_state = tf.zeros([BATCH_SIZE, lstm_size])
+    # Take linear combination of hidden states and produce syntax label
+    softmax_w = initialize_weights_cpu((PREFIX_SOFTMAX + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, LSTM_SIZE*2])
+    softmax_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
+    logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), softmax_w, 2), softmax_b)
 
-    outputs, states = tf.nn.bidirectional_dynamic_rnn(lstm_forward, lstm_backward, input_batch,
-            #initial_state_fw =initial_state, initial_state_bw = initial_state
-            #When I did this, I encountered an error that Tensors were not iterable.
-            dtype = tf.float32,
-            sequence_length = program_batch_code_length)
-
-    #Takes the two final cell states and softmaxes them
-    cell_states = tf.concat([states[0].c, states[1].c], 1)
-    print(cell_states.shape)
-    softmax_w = tf.get_variable("softmax_w", [2*lstm_size, 1], dtype = tf.float32)
-    softmax_b = tf.get_variable("softmax_b", [1], dtype = tf.float32) 
-    logits = tf.nn.xw_plus_b(cell_states, softmax_w, softmax_b)
-    logits = tf.reshape(logits,[32])
-
-    #returns a [batch_size] size vector with the probability that each batch has syntax errors
     return logits
 
 
@@ -339,17 +341,15 @@ def train_epf_8(num_epoch=1):
 
         # Compute syntax of corrected code
         syntax_batch = inference_syntax_python(corrected_batch, length_batch)
-        syntax_loss = loss(syntax_batch, tf.constant([1. for _ in range(BATCH_SIZE)], tf.float32))
+        syntax_loss = loss(syntax_batch, tf.constant([1. for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Compute behavior of corrected code
         behavior_batch = inference_behavior_python(corrected_batch)
-        behavior_loss = []
         for n in range(DATASET_IO_EXAMPLES):
-            input_example = tf.constant([n for _ in range(BATCH_SIZE)], tf.float32)
+            input_example = tf.constant([n for i in range(BATCH_SIZE)], tf.float32)
             output_prediction = behavior_batch(input_example)
-            behavior_loss.append(loss(output_prediction, input_example))
-        behavior_loss = tf.stack(behavior_loss)
+            behavior_loss = loss(output_prediction, input_example)
 
 
         # Obtain total loss of entire model
@@ -391,10 +391,6 @@ def train_epf_8(num_epoch=1):
                     syntax_value, loss_value = run_values.results
 
 
-                    # Perform some computation, e.g. export a plot, or calculate accuracy
-                    average_score = tf.reduce_mean(syntax_value)
-
-
                     # Display date, batch speed, estimated time, loss, and accuracy
                     print(
                         datetime.now(),
@@ -415,11 +411,11 @@ def train_epf_8(num_epoch=1):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=num_steps),
-            tf.train.CheckpointSaverHook(CHECKPOINT_BASEDIR,
+            tf.train.StopAtStepHook(num_steps=1),
+            tf.train.CheckpointSaverHook(
+                CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
-                saver=model_saver),
-            LogProgressHook()]) as session:
+                saver=model_saver)]) as session:
 
             # Repeat training iteratively
             while not session.should_stop():
