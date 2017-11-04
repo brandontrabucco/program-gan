@@ -3,8 +3,7 @@ import string as sn
 
 
 # The location on the disk of project
-PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
-    "Program Synthesis with Deep Learning/Repo/program-gan/")
+PROJECT_BASEDIR = './'
 
 
 # The location on the disk of checkpoints
@@ -12,8 +11,7 @@ CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
 
 
 # The location on the disk of project
-DATASET_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
-    "Program Synthesis with Deep Learning/Datasets/")
+DATASET_BASEDIR = PROJECT_BASEDIR
 
 
 # Filenames associated with program dataset
@@ -251,6 +249,7 @@ def inference_syntax_python(program_batch, length_batch):
     # Define forward and backward rnn layers
     lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
     lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+    initial_state = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
 
     
     # Compute rnn activations
@@ -258,6 +257,8 @@ def inference_syntax_python(program_batch, length_batch):
         lstm_forward, 
         lstm_backward, 
         program_batch,
+        initial_state_fw = initial_state,
+        initial_state_bw = initial_state,
         sequence_length=length_batch,
         dtype=tf.float32)
 
@@ -317,7 +318,7 @@ def train(total_loss):
 
 
 # Run single training cycle on dataset
-def train_epf_8(num_epoch=1):
+def train_epf_8(num_epoch=10):
 
     # Watch compute time per batch
     from time import time
@@ -411,7 +412,7 @@ def train_epf_8(num_epoch=1):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=1),
+            tf.train.StopAtStepHook(num_steps=100),
             tf.train.CheckpointSaverHook(
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
@@ -430,3 +431,6 @@ def train_epf_8(num_epoch=1):
     plt.xlabel("Training Epoch")
     plt.ylabel("Mean Huber Syntax Loss")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
+
+if __name__ == "__main__":
+    train_epf_8()
