@@ -252,20 +252,27 @@ def inference_syntax_python(program_batch, length_batch):
     lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
     lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
 
-    
+
+    # Initial state for lstm cell
+    initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+    initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
     # Compute rnn activations
     output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
-        lstm_forward, 
-        lstm_backward, 
+        lstm_forward,
+        lstm_backward,
         program_batch,
+        initial_state_fw=initial_state_fw,
+        initial_state_bw=initial_state_bw,
         sequence_length=length_batch,
         dtype=tf.float32)
 
 
     # Take linear combination of hidden states and produce syntax label
-    softmax_w = initialize_weights_cpu((PREFIX_SOFTMAX + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, LSTM_SIZE*2])
-    softmax_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
-    logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), softmax_w, 2), softmax_b)
+    linear_w = initialize_weights_cpu((PREFIX_SOFTMAX + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, LSTM_SIZE*2])
+    linear_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
+    logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
 
     return logits
 
@@ -411,11 +418,12 @@ def train_epf_8(num_epoch=1):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=1),
+            tf.train.StopAtStepHook(num_steps=num_steps),
             tf.train.CheckpointSaverHook(
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
-                saver=model_saver)]) as session:
+                saver=model_saver),
+            LogProgressHook()]) as session:
 
             # Repeat training iteratively
             while not session.should_stop():
