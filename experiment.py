@@ -274,6 +274,11 @@ def inference_syntax_python(program_batch, length_batch):
     linear_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
     logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
 
+    # Take linear combination of hidden states and produce syntax label
+    #linear_w = initialize_weights_cpu((PREFIX_SOFTMAX + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, len(DATASET_VOCABULARY)])
+    #linear_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
+    #logits = tf.add(tf.tensordot(program_batch, linear_w, 2), linear_b)
+
     return logits
 
 
@@ -292,7 +297,7 @@ def loss(prediction, labels):
 
 
 # Hyperparameters
-INITIAL_LEARNING_RATE = 0.001
+INITIAL_LEARNING_RATE = 0.01
 DECAY_STEPS = 10 * EPOCH_SIZE
 DECAY_FACTOR = 0.95
 
@@ -381,18 +386,18 @@ def train_epf_8(num_epoch=1):
             def before_run(self, run_context):
                 self.current_step += 1
                 self.start_time = time()
-                return tf.train.SessionRunArgs([syntax_batch, syntax_loss])
+                return tf.train.SessionRunArgs([syntax_batch, total_loss])
 
 
             # Just after inference
             def after_run(self, run_context, run_values):
 
                 # Calculate weighted speed
-                self.batch_speed = (0.2 * self.batch_speed) + (0.8 * (1.0 / (time() - self.start_time + 1e-7)))
+                self.batch_speed = (0.2 * self.batch_speed) + (0.8 * (1.0 / (time() - self.start_time + 1e-3)))
 
 
                 # Update every period of steps
-                if (self.current_step % EPOCH_SIZE == 0):
+                if (self.current_step % 1 == 0):
 
                     # Obtain graph results
                     syntax_value, loss_value = run_values.results
@@ -418,7 +423,7 @@ def train_epf_8(num_epoch=1):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=num_steps),
+            tf.train.StopAtStepHook(num_steps=100),
             tf.train.CheckpointSaverHook(
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
