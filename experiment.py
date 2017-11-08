@@ -424,23 +424,11 @@ def train_epf_5(num_epoch=1):
         mutated_batch = get_mutated_batch(program_batch)
 
 
-        # Compute corrected code
-        corrected_batch = inference_generator_python(program_batch)
-
-
-        # Compute syntax of corrected code
-        syntax_batch = inference_syntax_python(corrected_batch, length_batch)
+        # Compute syntax of original and mutated code
+        syntax_batch = inference_syntax_python(program_batch, length_batch)
         mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
         syntax_loss = loss(syntax_batch, tf.constant([1. for i in range(BATCH_SIZE)], tf.float32))
         mutated_syntax_loss = loss(mutated_syntax_batch, tf.constant([0. for i in range(BATCH_SIZE)], tf.float32))
-
-
-        # Compute behavior of corrected code
-        behavior_batch = inference_behavior_python(corrected_batch)
-        for n in range(DATASET_IO_EXAMPLES):
-            input_example = tf.constant([n for i in range(BATCH_SIZE)], tf.float32)
-            output_prediction = behavior_batch(input_example)
-            behavior_loss = loss(output_prediction, input_example)
 
 
         # Obtain total loss of entire model
@@ -522,3 +510,109 @@ def train_epf_5(num_epoch=1):
     plt.xlabel("Training Epoch")
     plt.ylabel("Mean Huber Syntax Loss")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
+
+
+DECISION_UPPER_BOUND = 1.0
+DECISION_LOWER_BOUND = 0.0
+DECISION_RANGE = 100
+
+
+# Run single training cycle on dataset
+def test_epf_5(model_checkpoint):
+
+    # Reset lstm kernel
+    global LSTM_INITIALIZED
+    LSTM_INITIALIZED = None
+
+
+    # Check current date and time
+    from datetime import datetime
+
+
+    # Create new graph
+    with tf.Graph().as_default():
+
+        # Compute single training batch
+        name_batch, examples_batch, program_batch, length_batch = training_batch_python()
+
+
+        # Obtain character mutations of programs
+        mutated_batch = get_mutated_batch(program_batch)
+
+
+        # Compute syntax of corrected code
+        syntax_batch = inference_syntax_python(program_batch, length_batch)
+        mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
+
+
+        # Group the previous operations
+        group_batch = tf.group(syntax_batch, mutated_syntax_batch)
+
+
+        # Store datapoints for precision and recall measures
+        precision_points = []
+        recall_points = []
+
+
+        # Binary classification decision boundary for precisio recall
+        DECISION_THRESHOLD = DECISION_LOWER_BOUND
+
+
+        # Report testing progress
+        class LogProgressHook(tf.train.SessionRunHook):
+
+
+            # Just before inference
+            def before_run(self, run_context):
+                return tf.train.SessionRunArgs([syntax_batch, mutated_syntax_batch])
+
+
+            # Just after inference
+            def after_run(self, run_context, run_values):
+
+                # Obtain graph results
+                syntax_value, mutated_value = run_values.results
+
+
+                # Calculate precision metric true_positive/(true_positive + false_positive)
+                precision = BATCH_SIZE / (BATCH_SIZE + sum([1. for element in mutated_value if element >= DECISION_THRESHOLD]))
+
+                
+                # Calculate precision metric true_positive/(true_positive + false_positive)
+                recall = BATCH_SIZE / (BATCH_SIZE + sum([1. for element in syntax_value if element <= DECISION_THRESHOLD]))
+
+
+                # Record current loss
+                precision_points.append(precision)
+                recall_points.append(recall)
+
+
+        # Prepare to save and load models
+        model_saver = tf.train.Saver()
+
+
+        # Perform computation cycle based on graph
+        with tf.train.MonitoredTrainingSession(hooks=[
+            LogProgressHook()]) as session:
+
+            # Load progress from checkpoint
+            model_saver.restore(session, model_checkpoint)
+
+
+            # Repeat testing iteratively for varying decision thresholds
+            for i in range(DECISION_RANGE + 1):
+
+                # Run single batch of testing
+                _ = session.run(group_batch)
+
+                
+                # Calculate new decision threshold
+                DECISION_THRESHOLD += (DECISION_UPPER_BOUND/DECISION_RANGE)
+
+
+     # Construct and save plot
+    import matplotlib.pyplot as plt
+    plt.scatter(recall_points, precision_points)
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_precision_recall.png")
