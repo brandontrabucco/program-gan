@@ -19,7 +19,7 @@ DATASET_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
 
 # Filenames associated with program dataset
 DATASET_FILENAMES_PYTHON = [
-    (DATASET_BASEDIR + "epf_8_dataset.csv")
+    (DATASET_BASEDIR + "epf_5_dataset.csv")
 ]
 
 
@@ -117,7 +117,7 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
 # Batch configuration constants
 BATCH_SIZE = 32
 NUM_THREADS = 4
-TOTAL_EXAMPLES = 2015538
+TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
 
 
@@ -397,7 +397,12 @@ def train(total_loss):
 
 
 # Run single training cycle on dataset
-def train_epf_8(num_epoch=1):
+def train_epf_5(num_epoch=1):
+
+    # Reset lstm kernel
+    global LSTM_INITIALIZED
+    LSTM_INITIALIZED = None
+
 
     # Watch compute time per batch
     from time import time
@@ -471,7 +476,7 @@ def train_epf_8(num_epoch=1):
 
 
                 # Update every period of steps
-                if (self.current_step % 1 == 0):
+                if (self.current_step % 10 == 0):
 
                     # Obtain graph results
                     syntax_value, loss_value = run_values.results
@@ -497,7 +502,7 @@ def train_epf_8(num_epoch=1):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=100),
+            tf.train.StopAtStepHook(num_steps=num_steps),
             tf.train.CheckpointSaverHook(
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
