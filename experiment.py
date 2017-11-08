@@ -437,7 +437,8 @@ def train_epf_5(num_epoch=1):
 
 
         # Store datapoints each epoch for plot
-        data_points = []
+        loss_points = []
+        iteration_points = []
 
 
         # Report testing progress
@@ -481,7 +482,8 @@ def train_epf_5(num_epoch=1):
 
 
                     # Record current loss
-                    data_points.append(loss_value)
+                    loss_points.append(loss_value)
+                    iteration_points.append(self.current_step)
 
 
         # Prepare to save and load models
@@ -506,8 +508,8 @@ def train_epf_5(num_epoch=1):
 
      # Construct and save plot
     import matplotlib.pyplot as plt
-    plt.plot(data_points)
-    plt.xlabel("Training Epoch")
+    plt.scatter(iteration_points, loss_points)
+    plt.xlabel("Batch Iteration")
     plt.ylabel("Mean Huber Syntax Loss")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
 
@@ -574,12 +576,25 @@ def test_epf_5(model_checkpoint):
                 syntax_value, mutated_value = run_values.results
 
 
+                # Calculations for precision and recall
+                false_positives = sum([1. for element in mutated_value if element >= DECISION_THRESHOLD])
+                false_negatives = sum([1. for element in syntax_value if element <= DECISION_THRESHOLD])
+
+
                 # Calculate precision metric true_positive/(true_positive + false_positive)
-                precision = BATCH_SIZE / (BATCH_SIZE + sum([1. for element in mutated_value if element >= DECISION_THRESHOLD]))
+                precision = BATCH_SIZE / (BATCH_SIZE + false_positives)
 
                 
                 # Calculate precision metric true_positive/(true_positive + false_positive)
-                recall = BATCH_SIZE / (BATCH_SIZE + sum([1. for element in syntax_value if element <= DECISION_THRESHOLD]))
+                recall = BATCH_SIZE / (BATCH_SIZE + false_negatives)
+
+
+                # Print result for verification
+                print(
+                    "Threshold: %.2f" % DECISION_THRESHOLD, 
+                    "Precision: %.2f" % precision, 
+                    "Recall: %.2f" % recall, 
+                    "Accurary: %.2f" % ((BATCH_SIZE * 2 - false_positives - false_negatives) / (BATCH_SIZE * 2)))
 
 
                 # Record current loss
