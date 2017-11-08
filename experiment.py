@@ -1,5 +1,6 @@
 import tensorflow as tf
 import string as sn
+import numpy as np
 
 
 # The location on the disk of project
@@ -50,7 +51,7 @@ def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULAR
     input_characters = tf.string_split([source_code_python], delimiter="")
 
 
-    # Convert integer lookup table
+    # Create integer lookup table
     lookup_table = tf.contrib.lookup.index_table_from_tensor(mapping=mapping_characters.values, default_value=0)
 
 
@@ -66,6 +67,26 @@ def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULAR
     expanded_tensor = tf.pad(one_hot_tensor, [[0, (DATASET_MAXIMUM - actual_length)], [0, 0]])
 
     return tf.reshape(expanded_tensor, [DATASET_MAXIMUM, len(vocabulary)]), actual_length
+
+
+def detokenize_source_code_python(one_hot_tensor, vocabulary=DATASET_VOCABULARY):
+
+    # List allowed characters
+    mapping_characters = tf.string_split([vocabulary], delimiter="")
+
+
+    # Select one hot index
+    indices = tf.argmax(one_hot_tensor, axis=2)
+
+
+    # Create integer lookup table
+    lookup_table = tf.contrib.lookup.index_to_string_table_from_tensor(mapping_characters.values, default_value="UNKNOWN")
+
+
+    # Lookup corrosponding string
+    program = lookup_table.lookup(indices)
+
+    return program
 
 
 # Read single row words
@@ -144,6 +165,47 @@ def training_batch_python():
     name_batch, examples_batch, program_batch, length_batch = generate_batch(name, examples, program, length)
 
     return name_batch, examples_batch, program_batch, length_batch
+
+
+# Mutation parameter
+NO_OF_MUTATIONS = 10
+VOCAB_SIZE = len(DATASET_VOCABULARY)
+
+
+# Creates a mutated program batch
+def get_mutated_batch(program_batch):
+
+    # generates batch_mutations, a 2D tensor of integers with shape (BATCH_SIZE, NO_OF_MUTATIONS) that represents the mutations to the batch
+    batch_mutations = tf.random_uniform([BATCH_SIZE, NO_OF_MUTATIONS], minval=10, maxval=VOCAB_SIZE, dtype=tf.int32)
+
+
+    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. BATCH_SIZE=2 and NO_OF_MUTATIONS=3 yields [[[0], [0], [0]], [[1], [1], [1]]]
+    # The numbers represent the index of the program to be mutated within the batch, so 0 refers to the first program in batch.
+    program_indices = tf.constant([[[i] for _ in range(NO_OF_MUTATIONS)] for i in range(BATCH_SIZE)])
+
+
+    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. Each number represents a random index within the program at which mutation occurs.
+    # the indices may repeat, so actual no of mutations within the program <= NO_OF_MUTATIONS
+    mutation_indices = tf.random_uniform([BATCH_SIZE, NO_OF_MUTATIONS, 1], minval=0, maxval=DATASET_MAXIMUM, dtype=tf.int32)
+
+
+    # generates the locations within batch at which the batch_mutations occur. Each index is [index of program within batch, index within program]
+    indices = tf.concat([program_indices, mutation_indices], 2)
+
+
+    # creates one hot tensor with random one hot vecs
+    updates = tf.one_hot(batch_mutations, VOCAB_SIZE, dtype=tf.float32)
+
+
+    # make a copy of program_batch as mutated_batch
+    mutated_batch = tf.Variable(tf.zeros(program_batch.shape))
+    mutated_op = tf.assign(mutated_batch, program_batch)
+
+
+    # mutates mutated_batch
+    mutated_result = tf.scatter_nd_update(mutated_op, indices, updates)
+
+    return mutated_result
 
 
 # Prefix model nomenclature
@@ -243,42 +305,48 @@ def inference_behavior_python(program_batch):
 
 # Hidden size of LSTM recurrent cell
 LSTM_SIZE = len(DATASET_VOCABULARY) * 2
+LSTM_INITIALIZED = None
 
 
 # Compute syntax label with brnn
 def inference_syntax_python(program_batch, length_batch):
 
-    # Define forward and backward rnn layers
-    lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
-    lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+    # Initialization flag for lstm
+    global LSTM_INITIALIZED
 
 
-    # Initial state for lstm cell
-    initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
-    initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(1)), reuse=LSTM_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
 
 
-    # Compute rnn activations
-    output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
-        lstm_forward,
-        lstm_backward,
-        program_batch,
-        initial_state_fw=initial_state_fw,
-        initial_state_bw=initial_state_bw,
-        sequence_length=length_batch,
-        dtype=tf.float32)
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
 
 
-    # Take linear combination of hidden states and produce syntax label
-    linear_w = initialize_weights_cpu((PREFIX_SOFTMAX + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, LSTM_SIZE*2])
-    linear_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
-    logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            program_batch,
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
 
-    # Take linear combination of hidden states and produce syntax label
-    #linear_w = initialize_weights_cpu((PREFIX_SOFTMAX + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, len(DATASET_VOCABULARY)])
-    #linear_b = initialize_biases_cpu((PREFIX_SOFTMAX + EXTENSION_BIASES), [1])
-    #logits = tf.add(tf.tensordot(program_batch, linear_w, 2), linear_b)
 
+    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(2)), reuse=LSTM_INITIALIZED) as scope:
+
+        # Take linear combination of hidden states and produce syntax label
+        linear_w = initialize_weights_cpu((scope.name + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, LSTM_SIZE*2])
+        linear_b = initialize_biases_cpu((scope.name + EXTENSION_BIASES), [1])
+        logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+
+    
+    LSTM_INITIALIZED = True
     return logits
 
 
@@ -347,13 +415,19 @@ def train_epf_8(num_epoch=1):
         name_batch, examples_batch, program_batch, length_batch = training_batch_python()
 
 
+        # Obtain character mutations of programs
+        mutated_batch = get_mutated_batch(program_batch)
+
+
         # Compute corrected code
         corrected_batch = inference_generator_python(program_batch)
 
 
         # Compute syntax of corrected code
         syntax_batch = inference_syntax_python(corrected_batch, length_batch)
+        mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
         syntax_loss = loss(syntax_batch, tf.constant([1. for i in range(BATCH_SIZE)], tf.float32))
+        mutated_syntax_loss = loss(mutated_syntax_batch, tf.constant([0. for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Compute behavior of corrected code
@@ -434,7 +508,7 @@ def train_epf_8(num_epoch=1):
             while not session.should_stop():
 
                 # Run single batch of training
-                session.run(gradient_batch)
+                gradient_value = session.run(gradient_batch)
 
 
      # Construct and save plot
