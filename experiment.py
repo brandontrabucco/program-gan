@@ -40,6 +40,66 @@ DATASET_VOCABULARY = sn.printable
 DATASET_MAXIMUM = 64
 
 
+# Batch configuration constants
+BATCH_SIZE = 64
+NUM_THREADS = 4
+TOTAL_EXAMPLES = 9330
+EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
+
+
+# Mutation parameter
+NO_OF_MUTATIONS = 10
+VOCAB_SIZE = len(DATASET_VOCABULARY)
+
+
+# Prefix model nomenclature
+PREFIX_RNN = "rnn"
+PREFIX_DENSE = "dense"
+PREFIX_SOFTMAX = "softmax"
+PREFIX_TOTAL = "total"
+PREFIX_GENERATOR = "generator"
+PREFIX_SYNTAX = "syntax"
+PREFIX_BEHAVIOR = "behavior"
+
+
+# Extension model nomenclature
+EXTENSION_NUMBER = (lambda number: "_" + str(number))
+EXTENSION_LOSS = "_loss"
+EXTENSION_WEIGHTS = "_weights"
+EXTENSION_BIASES = "_biases"
+EXTENSION_OFFSET = "_offset"
+EXTENSION_SCALE = "_scale"
+EXTENSION_ACTIVATION = "_activation"
+EXTENSION_COLUMN = "_column"
+
+
+# Collection model nomenclature
+COLLECTION_LOSSES = "losses"
+COLLECTION_PARAMETERS = "parameters"
+COLLECTION_ACTIVATIONS = "activations"
+
+
+# LSTM structural hyperparameters
+ENSEMBLE_SIZE = 1
+LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
+DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
+LSTM_INITIALIZED = None
+USE_DROPOUT = True
+
+
+# Hyperparameters
+INITIAL_LEARNING_RATE = 0.001
+DECAY_STEPS = EPOCH_SIZE
+DECAY_FACTOR = 0.5
+
+
+# Precision recall threshold parameters
+DECISION_UPPER_BOUND = 1.0
+DECISION_LOWER_BOUND = 0.0
+DECISION_RANGE = 100
+DECISION_WEIGHT = (lambda x: 6 * x * (1 - x))
+
+
 # Convert elements of python source code to one-hot token vectors
 def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULARY):
 
@@ -114,13 +174,6 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
     return name_column, example_columns, program_tensor, actual_length
 
 
-# Batch configuration constants
-BATCH_SIZE = 64
-NUM_THREADS = 4
-TOTAL_EXAMPLES = 9330
-EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
-
-
 # Generate batch from rows
 def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_threads=NUM_THREADS, shuffle_batch=True):
 
@@ -167,16 +220,10 @@ def training_batch_python():
     return name_batch, examples_batch, program_batch, length_batch
 
 
-# Mutation parameter
-NO_OF_MUTATIONS = 10
-VOCAB_SIZE = len(DATASET_VOCABULARY)
-
-
 # Creates a mutated program batch
 def get_mutated_batch(program_batch):
 
-    # generates batch_mutations a 2D tensor of integers with shape (BATCH_SIZE, NO_OF_MUTATIONS) 
-    # that represents the mutations to the batch
+    # Generate mutation indices for each character tensor
     batch_mutations = tf.random_uniform(
         [BATCH_SIZE, NO_OF_MUTATIONS], 
         minval=10, 
@@ -184,16 +231,11 @@ def get_mutated_batch(program_batch):
         dtype=tf.int32)
 
 
-    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. BATCH_SIZE=2 
-    # and NO_OF_MUTATIONS=3 yields [[[0], [0], [0]], [[1], [1], [1]]].
-    # The numbers represent the index of the program to be mutated within the batch
-    # so 0 refers to the first program in batch.
+    # Enumerate each program in batch for mutations
     program_indices = tf.constant([[[i] for _ in range(NO_OF_MUTATIONS)] for i in range(BATCH_SIZE)])
 
 
-    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. Each number represents 
-    # a random index within the program at which mutation occurs.
-    # the indices may repeat, so actual no of mutations within the program <= NO_OF_MUTATIONS
+    # Generate mutation indices for each program
     mutation_indices = tf.random_uniform(
         [BATCH_SIZE, NO_OF_MUTATIONS, 1], 
         minval=0, 
@@ -201,51 +243,23 @@ def get_mutated_batch(program_batch):
         dtype=tf.int32)
 
 
-    # Generates the locations within batch at which the batch_mutations occur. 
-    # Each index is [index of program within batch, index within program]
+    # Combine mutation indices with program enumeration
     indices = tf.concat([program_indices, mutation_indices], 2)
 
 
-    # creates one hot tensor with random one hot vecs
+    # Convert chartacter mutations to one hot tensor
     updates = tf.one_hot(batch_mutations, VOCAB_SIZE, dtype=tf.float32)
 
 
-    # make a copy of program_batch as mutated_batch
+    # Copy program_batch as mutated_batch
     mutated_batch = tf.Variable(tf.zeros(program_batch.shape))
     mutated_op = tf.assign(mutated_batch, program_batch)
 
 
-    # mutates mutated_batch
+    # Perform a random mutation
     mutated_result = tf.scatter_nd_update(mutated_op, indices, updates)
 
     return mutated_result
-
-
-# Prefix model nomenclature
-PREFIX_RNN = "rnn"
-PREFIX_DENSE = "dense"
-PREFIX_SOFTMAX = "softmax"
-PREFIX_TOTAL = "total"
-PREFIX_GENERATOR = "generator"
-PREFIX_SYNTAX = "syntax"
-PREFIX_BEHAVIOR = "behavior"
-
-
-# Extension model nomenclature
-EXTENSION_NUMBER = (lambda number: "_" + str(number))
-EXTENSION_LOSS = "_loss"
-EXTENSION_WEIGHTS = "_weights"
-EXTENSION_BIASES = "_biases"
-EXTENSION_OFFSET = "_offset"
-EXTENSION_SCALE = "_scale"
-EXTENSION_ACTIVATION = "_activation"
-EXTENSION_COLUMN = "_column"
-
-
-# Collection model nomenclature
-COLLECTION_LOSSES = "losses"
-COLLECTION_PARAMETERS = "parameters"
-COLLECTION_ACTIVATIONS = "activations"
 
 
 # Initialize trainable parameters
@@ -290,14 +304,6 @@ def initialize_biases_cpu(name, shape):
             dtype=tf.float32)
 
     return biases
-
-
-# LSTM structural hyperparameters
-ENSEMBLE_SIZE = 1
-LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
-DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
-LSTM_INITIALIZED = None
-USE_DROPOUT = True
 
 
 # Compute syntax label with brnn
@@ -407,12 +413,6 @@ def loss(prediction, labels):
     tf.add_to_collection(COLLECTION_LOSSES, huber_loss_mean)
 
     return huber_loss_mean
-
-
-# Hyperparameters
-INITIAL_LEARNING_RATE = 0.001
-DECAY_STEPS = EPOCH_SIZE
-DECAY_FACTOR = 0.5
 
 
 # Compute loss gradient and update parameters
@@ -558,13 +558,6 @@ def train_epf_5(num_epoch=1):
     plt.ylabel("Mean Huber Syntax Loss")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
     plt.close()
-
-
-# Precision recall threshold parameters
-DECISION_UPPER_BOUND = 1.0
-DECISION_LOWER_BOUND = 0.0
-DECISION_RANGE = 100
-DECISION_WEIGHT = (lambda x: 6 * x * (1 - x))
 
 
 # Run single training cycle on dataset
