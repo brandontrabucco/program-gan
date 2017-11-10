@@ -115,7 +115,7 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
 
 
 # Batch configuration constants
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 NUM_THREADS = 4
 TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
@@ -175,21 +175,34 @@ VOCAB_SIZE = len(DATASET_VOCABULARY)
 # Creates a mutated program batch
 def get_mutated_batch(program_batch):
 
-    # generates batch_mutations, a 2D tensor of integers with shape (BATCH_SIZE, NO_OF_MUTATIONS) that represents the mutations to the batch
-    batch_mutations = tf.random_uniform([BATCH_SIZE, NO_OF_MUTATIONS], minval=10, maxval=VOCAB_SIZE, dtype=tf.int32)
+    # generates batch_mutations a 2D tensor of integers with shape (BATCH_SIZE, NO_OF_MUTATIONS) 
+    # that represents the mutations to the batch
+    batch_mutations = tf.random_uniform(
+        [BATCH_SIZE, NO_OF_MUTATIONS], 
+        minval=10, 
+        maxval=VOCAB_SIZE, 
+        dtype=tf.int32)
 
 
-    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. BATCH_SIZE=2 and NO_OF_MUTATIONS=3 yields [[[0], [0], [0]], [[1], [1], [1]]]
-    # The numbers represent the index of the program to be mutated within the batch, so 0 refers to the first program in batch.
+    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. BATCH_SIZE=2 
+    # and NO_OF_MUTATIONS=3 yields [[[0], [0], [0]], [[1], [1], [1]]].
+    # The numbers represent the index of the program to be mutated within the batch
+    # so 0 refers to the first program in batch.
     program_indices = tf.constant([[[i] for _ in range(NO_OF_MUTATIONS)] for i in range(BATCH_SIZE)])
 
 
-    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. Each number represents a random index within the program at which mutation occurs.
+    # generates a tensor with shape [BATCH_SIZE, NO_OF_MUTATIONS, 1]. Each number represents 
+    # a random index within the program at which mutation occurs.
     # the indices may repeat, so actual no of mutations within the program <= NO_OF_MUTATIONS
-    mutation_indices = tf.random_uniform([BATCH_SIZE, NO_OF_MUTATIONS, 1], minval=0, maxval=DATASET_MAXIMUM, dtype=tf.int32)
+    mutation_indices = tf.random_uniform(
+        [BATCH_SIZE, NO_OF_MUTATIONS, 1], 
+        minval=0, 
+        maxval=DATASET_MAXIMUM, 
+        dtype=tf.int32)
 
 
-    # generates the locations within batch at which the batch_mutations occur. Each index is [index of program within batch, index within program]
+    # Generates the locations within batch at which the batch_mutations occur. 
+    # Each index is [index of program within batch, index within program]
     indices = tf.concat([program_indices, mutation_indices], 2)
 
 
@@ -306,6 +319,7 @@ def inference_behavior_python(program_batch):
 # Hidden size of LSTM recurrent cell
 LSTM_SIZE = len(DATASET_VOCABULARY) * 2
 LSTM_INITIALIZED = None
+DROPOUT_PROBABILITY = 0.5
 
 
 # Compute syntax label with brnn
@@ -315,6 +329,7 @@ def inference_syntax_python(program_batch, length_batch):
     global LSTM_INITIALIZED
 
 
+    # First bidirectional lstm layer
     with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(1)), reuse=LSTM_INITIALIZED) as scope:
 
         # Define forward and backward rnn layers
@@ -327,10 +342,21 @@ def inference_syntax_python(program_batch, length_batch):
         initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
 
 
+        # Compute dropout probabilities
+        dropout_forward = tf.contrib.rnn.DropoutWrapper(
+            lstm_forward, 
+            input_keep_prob=DROPOUT_PROBABILITY, 
+            output_keep_prob=DROPOUT_PROBABILITY)
+        dropout_backward = tf.contrib.rnn.DropoutWrapper(
+            lstm_backward, 
+            input_keep_prob=DROPOUT_PROBABILITY, 
+            output_keep_prob=DROPOUT_PROBABILITY)
+
+
         # Compute rnn activations
         output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
-            lstm_forward,
-            lstm_backward,
+            dropout_forward,
+            dropout_backward,
             program_batch,
             initial_state_fw=initial_state_fw,
             initial_state_bw=initial_state_bw,
@@ -338,14 +364,53 @@ def inference_syntax_python(program_batch, length_batch):
             dtype=tf.float32)
 
 
+    # Second bidirectional lstm layer
     with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(2)), reuse=LSTM_INITIALIZED) as scope:
 
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        dropout_forward = tf.contrib.rnn.DropoutWrapper(
+            lstm_forward, 
+            input_keep_prob=DROPOUT_PROBABILITY, 
+            output_keep_prob=DROPOUT_PROBABILITY)
+        dropout_backward = tf.contrib.rnn.DropoutWrapper(
+            lstm_backward, 
+            input_keep_prob=DROPOUT_PROBABILITY, 
+            output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            dropout_forward,
+            dropout_backward,
+            tf.concat(output_batch, 2),
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+    # Third attentional dense layer
+    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(3)), reuse=LSTM_INITIALIZED) as scope:
+
         # Take linear combination of hidden states and produce syntax label
-        linear_w = initialize_weights_cpu((scope.name + EXTENSION_WEIGHTS), [DATASET_MAXIMUM, LSTM_SIZE*2])
+        linear_w = initialize_weights_cpu(
+            (scope.name + EXTENSION_WEIGHTS), 
+            [DATASET_MAXIMUM, LSTM_SIZE*2])
         linear_b = initialize_biases_cpu((scope.name + EXTENSION_BIASES), [1])
         logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
 
     
+    # LSTM has been computed at least once, return calculation node
     LSTM_INITIALIZED = True
     return logits
 
@@ -365,8 +430,8 @@ def loss(prediction, labels):
 
 
 # Hyperparameters
-INITIAL_LEARNING_RATE = 0.001
-DECAY_STEPS = 10 * EPOCH_SIZE
+INITIAL_LEARNING_RATE = 0.0005
+DECAY_STEPS = EPOCH_SIZE
 DECAY_FACTOR = 0.5
 
 
