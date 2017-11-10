@@ -365,9 +365,9 @@ def loss(prediction, labels):
 
 
 # Hyperparameters
-INITIAL_LEARNING_RATE = 0.01
+INITIAL_LEARNING_RATE = 0.001
 DECAY_STEPS = 10 * EPOCH_SIZE
-DECAY_FACTOR = 0.95
+DECAY_FACTOR = 0.5
 
 
 # Compute loss gradient and update parameters
@@ -512,6 +512,7 @@ def train_epf_5(num_epoch=1):
     plt.xlabel("Batch Iteration")
     plt.ylabel("Mean Huber Syntax Loss")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
+    plt.close()
 
 
 DECISION_UPPER_BOUND = 1.0
@@ -631,3 +632,4 @@ def test_epf_5(model_checkpoint):
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_precision_recall.png")
+    plt.close()
