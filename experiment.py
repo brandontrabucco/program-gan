@@ -292,34 +292,12 @@ def initialize_biases_cpu(name, shape):
     return biases
 
 
-# Compute corrected tokenized code with rnn
-def inference_generator_python(program_batch):
-
-    # Placeholder weights for computation check
-    generator_weights = initialize_weights_cpu((PREFIX_GENERATOR + EXTENSION_WEIGHTS), program_batch.shape)
-
-    return program_batch * generator_weights
-
-
-# Compute behavior function with rnn
-def inference_behavior_python(program_batch):
-
-    # Placeholder weights for computation check
-    behavior_weights = initialize_weights_cpu((PREFIX_BEHAVIOR + EXTENSION_WEIGHTS), [BATCH_SIZE])
-
-
-    # Compute expected output given input example
-    def behavior_function(input_example):
-
-        return input_example * behavior_weights
-
-    return behavior_function
-
-
-# Hidden size of LSTM recurrent cell
-LSTM_SIZE = len(DATASET_VOCABULARY) * 2
+# LSTM structural hyperparameters
+ENSEMBLE_SIZE = 1
+LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
+DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
 LSTM_INITIALIZED = None
-DROPOUT_PROBABILITY = 0.5
+USE_DROPOUT = True
 
 
 # Compute syntax label with brnn
@@ -343,20 +321,21 @@ def inference_syntax_python(program_batch, length_batch):
 
 
         # Compute dropout probabilities
-        dropout_forward = tf.contrib.rnn.DropoutWrapper(
-            lstm_forward, 
-            input_keep_prob=DROPOUT_PROBABILITY, 
-            output_keep_prob=DROPOUT_PROBABILITY)
-        dropout_backward = tf.contrib.rnn.DropoutWrapper(
-            lstm_backward, 
-            input_keep_prob=DROPOUT_PROBABILITY, 
-            output_keep_prob=DROPOUT_PROBABILITY)
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
 
 
         # Compute rnn activations
         output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
-            dropout_forward,
-            dropout_backward,
+            lstm_forward,
+            lstm_backward,
             program_batch,
             initial_state_fw=initial_state_fw,
             initial_state_bw=initial_state_bw,
@@ -378,20 +357,21 @@ def inference_syntax_python(program_batch, length_batch):
 
 
         # Compute dropout probabilities
-        dropout_forward = tf.contrib.rnn.DropoutWrapper(
-            lstm_forward, 
-            input_keep_prob=DROPOUT_PROBABILITY, 
-            output_keep_prob=DROPOUT_PROBABILITY)
-        dropout_backward = tf.contrib.rnn.DropoutWrapper(
-            lstm_backward, 
-            input_keep_prob=DROPOUT_PROBABILITY, 
-            output_keep_prob=DROPOUT_PROBABILITY)
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
 
 
         # Compute rnn activations
         output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
-            dropout_forward,
-            dropout_backward,
+            lstm_forward,
+            lstm_backward,
             tf.concat(output_batch, 2),
             initial_state_fw=initial_state_fw,
             initial_state_bw=initial_state_bw,
@@ -430,7 +410,7 @@ def loss(prediction, labels):
 
 
 # Hyperparameters
-INITIAL_LEARNING_RATE = 0.0005
+INITIAL_LEARNING_RATE = 0.001
 DECAY_STEPS = EPOCH_SIZE
 DECAY_FACTOR = 0.5
 
@@ -580,9 +560,11 @@ def train_epf_5(num_epoch=1):
     plt.close()
 
 
+# Precision recall threshold parameters
 DECISION_UPPER_BOUND = 1.0
 DECISION_LOWER_BOUND = 0.0
 DECISION_RANGE = 100
+DECISION_WEIGHT = (lambda x: 6 * x * (1 - x))
 
 
 # Run single training cycle on dataset
@@ -629,6 +611,11 @@ def test_epf_5(model_checkpoint):
         # Report testing progress
         class LogProgressHook(tf.train.SessionRunHook):
 
+            
+            # Session is initialized
+            def begin(self):
+                self.weighted_accuracy = 0.0
+
 
             # Just before inference
             def before_run(self, run_context):
@@ -655,15 +642,20 @@ def test_epf_5(model_checkpoint):
                 recall = BATCH_SIZE / (BATCH_SIZE + false_negatives)
 
 
+                # Calculate the accuracy at this decision threshold
+                current_accuracy = (BATCH_SIZE * 2 - false_positives - false_negatives) / (BATCH_SIZE * 2)
+                self.weighted_accuracy += DECISION_WEIGHT(DECISION_THRESHOLD) * current_accuracy
+
+
                 # Print result for verification
                 print(
                     "Threshold: %.2f" % DECISION_THRESHOLD, 
                     "Precision: %.2f" % precision, 
                     "Recall: %.2f" % recall, 
-                    "Accurary: %.2f" % ((BATCH_SIZE * 2 - false_positives - false_negatives) / (BATCH_SIZE * 2)))
+                    "Weighted Accurary: %.2f" % self.weighted_accuracy)
 
 
-                # Record current loss
+                # Record current precision recall
                 precision_points.append(precision)
                 recall_points.append(recall)
 
