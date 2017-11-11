@@ -80,7 +80,7 @@ COLLECTION_ACTIVATIONS = "activations"
 
 
 # LSTM structural hyperparameters
-ENSEMBLE_SIZE = 1
+ENSEMBLE_SIZE = 2
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
 LSTM_INITIALIZED = None
@@ -330,11 +330,11 @@ def inference_syntax_python(program_batch, length_batch):
         if USE_DROPOUT:
             lstm_forward = tf.contrib.rnn.DropoutWrapper(
                 lstm_forward, 
-                input_keep_prob=DROPOUT_PROBABILITY, 
+                input_keep_prob=1.0, 
                 output_keep_prob=DROPOUT_PROBABILITY)
             lstm_backward = tf.contrib.rnn.DropoutWrapper(
                 lstm_backward, 
-                input_keep_prob=DROPOUT_PROBABILITY, 
+                input_keep_prob=1.0, 
                 output_keep_prob=DROPOUT_PROBABILITY)
 
 
@@ -560,7 +560,7 @@ def train_epf_5(num_epoch=1):
     plt.close()
 
 
-# Run single training cycle on dataset
+# Run single testing cycle on dataset
 def test_epf_5(model_checkpoint):
 
     # Reset lstm kernel
