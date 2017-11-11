@@ -47,12 +47,12 @@ TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
 
 
-# Mutation parameter
+# Mutation hyperparameters
 NO_OF_MUTATIONS = 10
 VOCAB_SIZE = len(DATASET_VOCABULARY)
 
 
-# Prefix model nomenclature
+# Prefix nomenclature
 PREFIX_RNN = "rnn"
 PREFIX_DENSE = "dense"
 PREFIX_SOFTMAX = "softmax"
@@ -62,7 +62,7 @@ PREFIX_SYNTAX = "syntax"
 PREFIX_BEHAVIOR = "behavior"
 
 
-# Extension model nomenclature
+# Extension nomenclature
 EXTENSION_NUMBER = (lambda number: "_" + str(number))
 EXTENSION_LOSS = "_loss"
 EXTENSION_WEIGHTS = "_weights"
@@ -73,7 +73,7 @@ EXTENSION_ACTIVATION = "_activation"
 EXTENSION_COLUMN = "_column"
 
 
-# Collection model nomenclature
+# Collection nomenclature
 COLLECTION_LOSSES = "losses"
 COLLECTION_PARAMETERS = "parameters"
 COLLECTION_ACTIVATIONS = "activations"
@@ -87,7 +87,7 @@ LSTM_INITIALIZED = None
 USE_DROPOUT = True
 
 
-# Hyperparameters
+# Training hyperparameters
 INITIAL_LEARNING_RATE = 0.001
 DECAY_STEPS = EPOCH_SIZE
 DECAY_FACTOR = 0.5
