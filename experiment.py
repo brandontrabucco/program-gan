@@ -76,7 +76,6 @@ COLLECTION_ACTIVATIONS = "activations"
 ENSEMBLE_SIZE = 2
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
-SYNTAX_INITIALIZED = None
 USE_DROPOUT = True
 
 
@@ -558,7 +557,7 @@ def inference_behavior_python(program_batch, length_batch):
     return behavior_function
 
 
-# Utility function to reset graph
+# Utility function reset initialization flags
 def reset_graph():
 
     # Reset lstm kernel
