@@ -609,12 +609,12 @@ def train_epf_5(num_epochs=1):
 
         # Compute syntax of original source code
         syntax_batch = inference_syntax_python(program_batch, length_batch)
-        syntax_loss = loss(syntax_batch, tf.constant([1. for i in range(BATCH_SIZE)], tf.float32))
+        syntax_loss = loss(syntax_batch, tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Compute syntax of mutated source code
         mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
-        mutated_syntax_loss = loss(mutated_syntax_batch, tf.constant([0. for i in range(BATCH_SIZE)], tf.float32))
+        mutated_syntax_loss = loss(mutated_syntax_batch, tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Slice examples into input output
