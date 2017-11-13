@@ -12,7 +12,9 @@ PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
 
 
 # The location on the disk of checkpoints
-CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Checkpoints/")
+CHECKPOINT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
+    "Program Synthesis with Deep Learning/Checkpoints/")
+
 
 
 # The location on the disk of project
