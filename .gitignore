@@ -1,8 +1,8 @@
 *.ini
-*.png
 **/.git
 **/.vs
-**/Documents
-**/References
+**/Backups
+**/Citations
 **/Datasets
-**/Checkpoints
+**/Papers
+**/Results

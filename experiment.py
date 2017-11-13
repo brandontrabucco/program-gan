@@ -8,18 +8,19 @@ from datetime import datetime
 
 # The location on the disk of project
 PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
-    "Program Synthesis with Deep Learning/Repo/program-gan/")
+    "Program Synthesis with Deep Learning/")
+
+
+# The location on the disk of plots and images
+PLOT_BASEDIR = (PROJECT_BASEDIR + "Results/")
 
 
 # The location on the disk of checkpoints
-CHECKPOINT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
-    "Program Synthesis with Deep Learning/Checkpoints/")
-
+CHECKPOINT_BASEDIR = (PROJECT_BASEDIR + "Backups/")
 
 
 # The location on the disk of project
-DATASET_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
-    "Program Synthesis with Deep Learning/Datasets/")
+DATASET_BASEDIR = (PROJECT_BASEDIR + "Datasets/")
 
 
 # Filenames associated with program dataset
@@ -38,29 +39,20 @@ for FILE_PYTHON in DATASET_FILENAMES_PYTHON:
 DATASET_IO_EXAMPLES = 10
 DATASET_COLUMNS = (DATASET_IO_EXAMPLES * 2) + 2
 DATASET_DEFAULT = "0"
-
-
-# Tokenization parameters for python
-DATASET_VOCABULARY = sn.printable
 DATASET_MAXIMUM = 64
+DATASET_VOCABULARY = sn.printable
+VOCAB_SIZE = len(DATASET_VOCABULARY)
+NO_OF_MUTATIONS = 10
 
 
-# Batch configuration constants
+# Batch and logging configuration constants
 BATCH_SIZE = 64
-NUM_THREADS = 4
 TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
-
-
-# Mutation hyperparameters
-NO_OF_MUTATIONS = 10
-VOCAB_SIZE = len(DATASET_VOCABULARY)
+LOGGING_SIZE = 100
 
 
 # Prefix nomenclature
-PREFIX_RNN = "rnn"
-PREFIX_DENSE = "dense"
-PREFIX_SOFTMAX = "softmax"
 PREFIX_TOTAL = "total"
 PREFIX_GENERATOR = "generator"
 PREFIX_SYNTAX = "syntax"
@@ -72,10 +64,6 @@ EXTENSION_NUMBER = (lambda number: "_" + str(number))
 EXTENSION_LOSS = "_loss"
 EXTENSION_WEIGHTS = "_weights"
 EXTENSION_BIASES = "_biases"
-EXTENSION_OFFSET = "_offset"
-EXTENSION_SCALE = "_scale"
-EXTENSION_ACTIVATION = "_activation"
-EXTENSION_COLUMN = "_column"
 
 
 # Collection nomenclature
@@ -94,8 +82,11 @@ USE_DROPOUT = True
 
 # Behavior function hyperparameters
 BEHAVIOR_ORDER = 3
-COEFFICIENT_PIVOT = 2
-IO_EXAMPLE_PIVOT = 1
+BEHAVIOR_WIDTH = 16
+BEHAVIOR_DEPTH= 2
+BEHAVIOR_TOPOLOGY = ([[1, BEHAVIOR_WIDTH]] + 
+    [[BEHAVIOR_WIDTH, BEHAVIOR_WIDTH] for i in range(BEHAVIOR_DEPTH)] + 
+    [[BEHAVIOR_WIDTH, 1]])
 
 
 # Training hyperparameters
@@ -188,7 +179,7 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
 
 
 # Generate batch from rows
-def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_threads=NUM_THREADS, shuffle_batch=True):
+def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_threads=8, shuffle_batch=True):
 
     # Shuffle batch randomly
     if shuffle_batch:
@@ -497,14 +488,40 @@ def inference_behavior_python(program_batch, length_batch):
     # Third attentional dense layer
     with tf.variable_scope((PREFIX_BEHAVIOR + EXTENSION_NUMBER(3)), reuse=BEHAVIOR_INITIALIZED) as scope:
 
-        # Take linear combination of hidden states and produce behavior coefficients
-        linear_w = initialize_weights_cpu(
-            (scope.name + EXTENSION_WEIGHTS), 
-            [DATASET_MAXIMUM, (LSTM_SIZE * 2), (BEHAVIOR_ORDER + 1)])
-        linear_b = initialize_biases_cpu(
-            (scope.name + EXTENSION_BIASES), 
-            [(BEHAVIOR_ORDER + 1)])
-        coefficients = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+        # Compute the weights and biases for behavior hypernetwork
+        hypernet_w = []
+        hypernet_b = []
+
+
+        # Compute each layer weights for hypernet
+        for i, layer in enumerate(BEHAVIOR_TOPOLOGY):
+
+            # Take linear combination of hidden states and produce hypernet weights
+            linear_w_0 = initialize_weights_cpu(
+                (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(0)), 
+                ([DATASET_MAXIMUM, (LSTM_SIZE * 2)] + layer))
+            linear_b_0 = initialize_biases_cpu(
+                (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(0)), 
+                layer)
+            weights = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_0, 2), linear_b_0)
+
+
+            # Append these weights to the layers of hypernet
+            hypernet_w.append(weights)
+
+
+            # Take linear combination of hidden states and produce hypernet biases
+            linear_w_1 = initialize_weights_cpu(
+                (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(1)), 
+                ([DATASET_MAXIMUM, (LSTM_SIZE * 2), layer[-1]]))
+            linear_b_1 = initialize_biases_cpu(
+                (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(1)), 
+                [layer[-1]])
+            biases = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_1, 2), linear_b_1)
+
+
+            # Append these weights to the layers of hypernet
+            hypernet_b.append(biases)
 
     
     # LSTM has been computed at least once
@@ -514,27 +531,29 @@ def inference_behavior_python(program_batch, length_batch):
     # Compute expected output given input example
     def behavior_function(input_examples):
 
-        # Prepare input power series
-        input_example = tf.expand_dims(input_examples, COEFFICIENT_PIVOT)
-        power_factor = tf.ones(input_example.shape)
-        power_series = power_factor
+        # Add additional dimension end of input [64, 10, 1]
+        activation = tf.expand_dims(input_examples, -1)
 
 
-        # Concatenate higher powers of input
-        for i in range(BEHAVIOR_ORDER):
+        # Compute hypernet behavior function
+        for i in range(BEHAVIOR_DEPTH + 2):
+            
+            # Reshape previous activation to align elementwise multiplication [64, 10, 1, 16]
+            pre_activation = tf.tile(tf.expand_dims(activation, -1), [1, 1, 1, BEHAVIOR_TOPOLOGY[i][-1]])
 
-            # Calculate current power order
-            power_factor *= input_example
+
+            # Reshape weights to align elementwise multipliction [64, 10, 1, 16]
+            weights = tf.tile(tf.expand_dims(hypernet_w[i], 1), [1, DATASET_IO_EXAMPLES, 1, 1])
 
 
-            # Append to power series
-            power_series = tf.concat([power_series, power_factor], COEFFICIENT_PIVOT)
+            # Reshape biases to align elementwise addition [64, 10, 16]
+            biases = tf.tile(tf.expand_dims(hypernet_b[i], 1), [1, DATASET_IO_EXAMPLES, 1])
 
-        return tf.reduce_sum(
-            (power_series * tf.tile(
-                tf.expand_dims(coefficients, IO_EXAMPLE_PIVOT), 
-                [DATASET_IO_EXAMPLES if (i == IO_EXAMPLE_PIVOT) else 1 for i in range(3)])), 
-            axis=COEFFICIENT_PIVOT)
+
+            # Compute batch-example wise tensor product and relu activation [64, 10, 16]
+            activation = tf.nn.relu(tf.reduce_sum(pre_activation * weights, axis=2) + biases + 10.0)
+
+        return tf.reshape(activation, [BATCH_SIZE, DATASET_IO_EXAMPLES])
 
     return behavior_function
 
@@ -545,7 +564,6 @@ def reset_graph():
     # Reset lstm kernel
     global SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED
     SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED = None, None
-
 
 
 # Compute loss for syntax discriminator
@@ -611,17 +629,30 @@ def train_epf_5(num_epochs=1):
 
         # Compute syntax of original source code
         syntax_batch = inference_syntax_python(program_batch, length_batch)
-        syntax_loss = loss(syntax_batch, tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32))
+        syntax_loss = loss(
+            syntax_batch, 
+            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Compute syntax of mutated source code
         mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
-        mutated_syntax_loss = loss(mutated_syntax_batch, tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32))
+        mutated_syntax_loss = loss(
+            mutated_syntax_batch, 
+            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Slice examples into input output
-        input_examples_batch = tf.strided_slice(examples_batch, [0, 0], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
-        output_examples_batch = tf.strided_slice(examples_batch, [0, 1], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
+        input_examples_batch = tf.strided_slice(
+            examples_batch, 
+            [0, 0], 
+            [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], 
+            strides=[1, 2])
+        output_examples_batch = tf.strided_slice(
+            examples_batch, 
+            [0, 1], 
+            [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], 
+            strides=[1, 2])
+        print(input_examples_batch.shape)
 
 
         # Compute behavior function of original code
@@ -637,58 +668,59 @@ def train_epf_5(num_epochs=1):
 
 
         # Obtain total loss of entire model
-        total_loss = tf.add_n(tf.get_collection(COLLECTION_LOSSES), name=(PREFIX_TOTAL + EXTENSION_LOSS))
+        total_loss = tf.add_n(
+            tf.get_collection(COLLECTION_LOSSES), 
+            name=(PREFIX_TOTAL + EXTENSION_LOSS))
         gradient_batch = train(total_loss)
 
 
-        # Store datapoints each epoch for plot
-
-
         # Report testing progress
-        class LogProgressHook(tf.train.SessionRunHook):
+        class LogEpochHook(tf.train.SessionRunHook):
 
             # Session is initialized
             def begin(self):
-                self.current_step = 0
-                self.batch_speed = 0
+                self.start_time = time()
                 self.loss_points = []
                 self.iteration_points = []
 
 
             # Just before inference
             def before_run(self, run_context):
-                self.current_step += 1
-                self.start_time = time()
-                return tf.train.SessionRunArgs(total_loss)
+                return tf.train.SessionRunArgs([
+                    tf.train.get_global_step(),
+                    total_loss])
 
 
             # Just after inference
             def after_run(self, run_context, run_values):
+                
+                # Obtain graph results
+                current_step, loss_value = run_values.results
+
 
                 # Calculate weighted speed
-                self.batch_speed = (0.2 * self.batch_speed) + (0.8 * (1.0 / (time() - self.start_time + 1e-3)))
+                current_time = time()
+                batch_speed = 1.0 / (current_time - self.start_time + 1e-3)
+                self.start_time = current_time
 
 
                 # Update every period of steps
-                if (self.current_step % 10 == 0):
-
-                    # Obtain graph results
-                    loss_value = run_values.results
+                if (current_step % (num_steps // LOGGING_SIZE if num_steps > LOGGING_SIZE else 1) == 0):
 
 
                     # Display date, batch speed, estimated time, loss, and accuracy
                     print(
                         datetime.now(),
-                        "CUR: %d" % self.current_step,
-                        "REM: %d" % (num_steps - self.current_step),
-                        "SPD: %.2f bat/sec" % self.batch_speed,
-                        "ETA: %.2f hrs" % ((num_steps - self.current_step) / self.batch_speed / 60 / 60),
+                        "CUR: %d" % current_step,
+                        "REM: %d" % (num_steps - current_step),
+                        "SPD: %.2f bat/sec" % batch_speed,
+                        "ETA: %.2f hrs" % ((num_steps - current_step) / batch_speed / 60 / 60),
                         "L: %.2f" % loss_value)
 
 
                     # Record current loss
                     self.loss_points.append(loss_value)
-                    self.iteration_points.append(self.current_step)
+                    self.iteration_points.append(current_step)
 
 
         # Prepare to save and load models
@@ -696,7 +728,7 @@ def train_epf_5(num_epochs=1):
 
 
         # Track datapoints as testing progresses
-        data_saver = LogProgressHook()
+        data_saver = LogEpochHook()
 
 
         # Perform computation cycle based on graph
@@ -716,11 +748,17 @@ def train_epf_5(num_epochs=1):
 
 
     # Construct and save training loss plot
-    plt.scatter(data_saver.iteration_points, data_saver.loss_points)
+    plt.plot(
+        data_saver.iteration_points, 
+        data_saver.loss_points,
+        "b--o")
     plt.xlabel("Batch Iteration")
     plt.ylabel("Mean Huber Loss")
     plt.yscale("log")
-    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_training_loss.png")
+    plt.savefig(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_training_loss.png")
     plt.close()
 
 
@@ -748,8 +786,16 @@ def test_epf_5(model_checkpoint):
 
 
         # Slice examples into input output
-        input_examples_batch = tf.strided_slice(examples_batch, [0, 0], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
-        output_examples_batch = tf.strided_slice(examples_batch, [0, 1], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
+        input_examples_batch = tf.strided_slice(
+            examples_batch, 
+            [0, 0], 
+            [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], 
+            strides=[1, 2])
+        output_examples_batch = tf.strided_slice(
+            examples_batch, 
+            [0, 1], 
+            [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], 
+            strides=[1, 2])
 
 
         # Compute behavior function of original code
@@ -777,7 +823,7 @@ def test_epf_5(model_checkpoint):
 
 
         # Report testing progress
-        class LogProgressHook(tf.train.SessionRunHook):
+        class LogEpochHook(tf.train.SessionRunHook):
 
             
             # Session is initialized
@@ -830,16 +876,13 @@ def test_epf_5(model_checkpoint):
 
                 # Print result for verification
                 print(
-                    "SYNTAX |",
-                    "Threshold: %.2f" % SYNTAX_THRESHOLD,
-                    "Precision: %.2f" % precision, 
-                    "Recall: %.2f" % recall,
-                    "Accurary: %.2f" % self.syntax_accuracy)
-                print(
-                    "BEHAVIOR |",
-                    "Error Mean: %.2f" % self.error_mean.mean(),
-                    "Error STD: %.2f" % self.error_std.mean())
-                print("")
+                    datetime.now(),
+                    "THD: %.2f" % SYNTAX_THRESHOLD,
+                    "PRE: %.2f" % precision, 
+                    "REC: %.2f" % recall,
+                    "ACC: %.2f" % (self.syntax_accuracy * 100),
+                    "ERR Mean: %.2f" % self.error_mean.mean(),
+                    "ERR STD: %.2f" % self.error_std.mean())
 
 
                 # Record current precision recall
@@ -852,7 +895,7 @@ def test_epf_5(model_checkpoint):
 
 
         # Track datapoints as testing progresses
-        data_saver = LogProgressHook()
+        data_saver = LogEpochHook()
 
 
         # Perform computation cycle based on graph
@@ -875,16 +918,33 @@ def test_epf_5(model_checkpoint):
 
 
      # Construct and precision recall save plot
-    plt.scatter(data_saver.recall_points, data_saver.precision_points)
+    plt.plot(
+        data_saver.recall_points, 
+        data_saver.precision_points,
+        "b--o")
     plt.xlabel("Recall")
     plt.ylabel("Precision")
-    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_precision_recall.png")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.savefig(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_precision_recall.png")
     plt.close()
 
 
     # Construct and save behavior error plot
-    plt.errorbar(np.arange(10), data_saver.error_mean, yerr=data_saver.error_std, fmt="--o", ecolor="g", capsize=10)
+    plt.errorbar(
+        np.arange(10), 
+        data_saver.error_mean, 
+        yerr=data_saver.error_std, 
+        fmt="b--o", 
+        ecolor="g", 
+        capsize=10)
     plt.xlabel("IO Example")
     plt.ylabel("Behavior Error")
-    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_behavior_error.png")
+    plt.savefig(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_behavior_error.png")
     plt.close()
