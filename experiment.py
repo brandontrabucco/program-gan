@@ -397,12 +397,12 @@ def inference_syntax(program_batch, length_batch):
         linear_b = initialize_biases_cpu(
             (scope.name + EXTENSION_BIASES), 
             [1])
-        logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+        output_batch = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
 
     
     # LSTM has been computed at least once, return calculation node
     SYNTAX_INITIALIZED = True
-    return logits
+    return output_batch
 
 
 # Compute behavior function with brnn
@@ -496,35 +496,31 @@ def inference_behavior(program_batch, length_batch):
         for i, layer in enumerate(BEHAVIOR_TOPOLOGY):
 
             # Take linear combination of hidden states and produce hypernet weights
-            linear_w_0 = initialize_weights_cpu(
-                (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(0)), 
+            linear_w_w = initialize_weights_cpu(
+                (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_WEIGHTS), 
                 ([DATASET_MAXIMUM, (LSTM_SIZE * 2)] + layer))
-            linear_b_0 = initialize_biases_cpu(
-                (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(0)), 
+            linear_w_b = initialize_biases_cpu(
+                (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_BIASES), 
                 layer)
             weights = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_0, 2), linear_b_0)
 
 
-            # Append these weights to the layers of hypernet
+            # Append weights to layers of hypernet
             hypernet_w.append(weights)
 
 
             # Take linear combination of hidden states and produce hypernet biases
-            linear_w_1 = initialize_weights_cpu(
-                (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(1)), 
+            linear_b_w = initialize_weights_cpu(
+                (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_WEIGHTS), 
                 ([DATASET_MAXIMUM, (LSTM_SIZE * 2), layer[-1]]))
-            linear_b_1 = initialize_biases_cpu(
-                (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_NUMBER(1)), 
+            linear_b_b = initialize_biases_cpu(
+                (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_BIASES), 
                 [layer[-1]])
             biases = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_1, 2), linear_b_1)
 
 
-            # Append these weights to the layers of hypernet
+            # Append biases to layers of hypernet
             hypernet_b.append(biases)
-
-    
-    # LSTM has been computed at least once
-    BEHAVIOR_INITIALIZED = True
 
 
     # Compute expected output given input example
@@ -554,6 +550,9 @@ def inference_behavior(program_batch, length_batch):
 
         return tf.reshape(activation, [BATCH_SIZE, DATASET_IO_EXAMPLES])
 
+
+    # LSTM has been computed at least once
+    BEHAVIOR_INITIALIZED = True
     return behavior_function
 
 
