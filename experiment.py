@@ -46,7 +46,7 @@ TOTAL_MUTATIONS = 10
 
 
 # Batch and logging configuration constants
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
 TOTAL_LOGS = 100
@@ -73,15 +73,15 @@ COLLECTION_ACTIVATIONS = "activations"
 
 
 # LSTM structural hyperparameters
-ENSEMBLE_SIZE = 2
+ENSEMBLE_SIZE = 1
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
 USE_DROPOUT = True
 
 
 # Behavior function hyperparameters
-BEHAVIOR_WIDTH = 16
-BEHAVIOR_DEPTH= 2
+BEHAVIOR_WIDTH = 4
+BEHAVIOR_DEPTH= 1
 BEHAVIOR_TOPOLOGY = ([[1, BEHAVIOR_WIDTH]] + 
     [[BEHAVIOR_WIDTH, BEHAVIOR_WIDTH] for i in range(BEHAVIOR_DEPTH)] + 
     [[BEHAVIOR_WIDTH, 1]])
@@ -501,7 +501,7 @@ def inference_behavior(program_batch, length_batch):
             linear_w_b = initialize_biases_cpu(
                 (scope.name + EXTENSION_WEIGHTS + EXTENSION_NUMBER(i) + EXTENSION_BIASES), 
                 layer)
-            weights = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_0, 2), linear_b_0)
+            weights = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_w, 2), linear_w_b)
 
 
             # Append weights to layers of hypernet
@@ -515,7 +515,7 @@ def inference_behavior(program_batch, length_batch):
             linear_b_b = initialize_biases_cpu(
                 (scope.name + EXTENSION_BIASES + EXTENSION_NUMBER(i) + EXTENSION_BIASES), 
                 [layer[-1]])
-            biases = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_1, 2), linear_b_1)
+            biases = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_b_w, 2), linear_b_b)
 
 
             # Append biases to layers of hypernet
@@ -533,7 +533,7 @@ def inference_behavior(program_batch, length_batch):
         for i in range(BEHAVIOR_DEPTH + 2):
             
             # Reshape previous activation to align elementwise multiplication [64, 10, 1, 16]
-            pre_activation = tf.tile(tf.expand_dims(activation, -1), [1, 1, 1, BEHAVIOR_TOPOLOGY[i][-1]])
+            activation = tf.tile(tf.expand_dims(activation, -1), [1, 1, 1, BEHAVIOR_TOPOLOGY[i][-1]])
 
 
             # Reshape weights to align elementwise multipliction [64, 10, 1, 16]
@@ -545,7 +545,7 @@ def inference_behavior(program_batch, length_batch):
 
 
             # Compute batch-example wise tensor product and relu activation [64, 10, 16], dead relu offset
-            activation = tf.nn.relu(tf.reduce_sum(pre_activation * weights, axis=2) + biases + 10.0)
+            activation = tf.nn.relu(tf.reduce_sum(activation * weights, axis=2) + biases + 10.0)
 
         return tf.reshape(activation, [BATCH_SIZE, DATASET_IO_EXAMPLES])
 
@@ -911,7 +911,7 @@ def test_epf_5(model_checkpoint):
 
 
             # Repeat testing iteratively for varying decision thresholds
-            for i in range(THRESHOLD_RANGE + 1):
+            for i in range(THRESHOLD_RANGE):
 
                 # Run single batch of testing
                 session.run(group_batch)
@@ -924,8 +924,6 @@ def test_epf_5(model_checkpoint):
         "b--o")
     plt.xlabel("Recall")
     plt.ylabel("Precision")
-    plt.xscale("log")
-    plt.yscale("log")
     plt.savefig(
         PLOT_BASEDIR + 
         datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
