@@ -1,7 +1,7 @@
 import tensorflow as tf
-import string as sn
 import numpy as np
 import matplotlib.pyplot as plt
+import string as sn
 from time import time
 from datetime import datetime
 
@@ -24,15 +24,15 @@ DATASET_BASEDIR = (PROJECT_BASEDIR + "Datasets/")
 
 
 # Filenames associated with program dataset
-DATASET_FILENAMES_PYTHON = [
+DATASET_FILENAMES = [
     (DATASET_BASEDIR + "epf_5_dataset.csv")
 ]
 
 
 # Locate dataset files on hard disk
-for FILE_PYTHON in DATASET_FILENAMES_PYTHON:
-    if not tf.gfile.Exists(FILE_PYTHON):
-        raise ValueError('Failed to find file: ' + FILE_PYTHON)
+for FILE in DATASET_FILENAMES:
+    if not tf.gfile.Exists(FILE):
+        raise ValueError('Failed to find file: ' + FILE)
 
 
 # Dataset configuration constants
@@ -42,14 +42,14 @@ DATASET_DEFAULT = "0"
 DATASET_MAXIMUM = 64
 DATASET_VOCABULARY = sn.printable
 VOCAB_SIZE = len(DATASET_VOCABULARY)
-NO_OF_MUTATIONS = 10
+TOTAL_MUTATIONS = 10
 
 
 # Batch and logging configuration constants
 BATCH_SIZE = 64
 TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
-LOGGING_SIZE = 100
+TOTAL_LOGS = 100
 
 
 # Prefix nomenclature
@@ -80,7 +80,6 @@ USE_DROPOUT = True
 
 
 # Behavior function hyperparameters
-BEHAVIOR_ORDER = 3
 BEHAVIOR_WIDTH = 16
 BEHAVIOR_DEPTH= 2
 BEHAVIOR_TOPOLOGY = ([[1, BEHAVIOR_WIDTH]] + 
@@ -209,7 +208,7 @@ def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_t
 def get_training_batch():
 
     # A queue to generate batches
-    filename_queue = tf.train.string_input_producer(DATASET_FILENAMES_PYTHON)
+    filename_queue = tf.train.string_input_producer(DATASET_FILENAMES)
 
 
     # Decode from string to floating point
@@ -227,19 +226,19 @@ def mutate_program_batch(program_batch):
 
     # Generate mutation indices for each character tensor
     batch_mutations = tf.random_uniform(
-        [BATCH_SIZE, NO_OF_MUTATIONS], 
+        [BATCH_SIZE, TOTAL_MUTATIONS], 
         minval=10, 
         maxval=VOCAB_SIZE, 
         dtype=tf.int32)
 
 
     # Enumerate each program in batch for mutations
-    program_indices = tf.constant([[[i] for _ in range(NO_OF_MUTATIONS)] for i in range(BATCH_SIZE)])
+    program_indices = tf.constant([[[i] for _ in range(TOTAL_MUTATIONS)] for i in range(BATCH_SIZE)])
 
 
     # Generate mutation indices for each program
     mutation_indices = tf.random_uniform(
-        [BATCH_SIZE, NO_OF_MUTATIONS, 1], 
+        [BATCH_SIZE, TOTAL_MUTATIONS, 1], 
         minval=0, 
         maxval=DATASET_MAXIMUM, 
         dtype=tf.int32)
@@ -702,7 +701,7 @@ def train_epf_5(num_epochs=1):
 
 
                 # Update every period of steps
-                if current_step % max(num_steps // LOGGING_SIZE, 1) == 0:
+                if current_step % max(num_steps // TOTAL_LOGS, 1) == 0:
 
 
                     # Display date, batch speed, estimated time, loss, and accuracy
