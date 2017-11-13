@@ -1,6 +1,9 @@
 import tensorflow as tf
 import string as sn
 import numpy as np
+import matplotlib.pyplot as plt
+from time import time
+from datetime import datetime
 
 
 # The location on the disk of project
@@ -83,8 +86,14 @@ COLLECTION_ACTIVATIONS = "activations"
 ENSEMBLE_SIZE = 2
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
-LSTM_INITIALIZED = None
+SYNTAX_INITIALIZED = None
 USE_DROPOUT = True
+
+
+# Behavior function hyperparameters
+BEHAVIOR_ORDER = 3
+COEFFICIENT_PIVOT = 2
+IO_EXAMPLE_PIVOT = 1
 
 
 # Training hyperparameters
@@ -94,10 +103,12 @@ DECAY_FACTOR = 0.5
 
 
 # Precision recall threshold parameters
-DECISION_UPPER_BOUND = 1.0
-DECISION_LOWER_BOUND = 0.0
-DECISION_RANGE = 100
-DECISION_WEIGHT = (lambda x: 6 * x * (1 - x))
+THRESHOLD_UPPER = 1.0
+THRESHOLD_LOWER = 0.0
+THRESHOLD_RANGE = 100
+THRESHOLD_DELTA = (THRESHOLD_UPPER - THRESHOLD_LOWER) / THRESHOLD_RANGE
+DENSITY_FUNCTION = (lambda x: (6 / (THRESHOLD_UPPER - THRESHOLD_LOWER)**3) * (x - THRESHOLD_LOWER) * (THRESHOLD_UPPER - x))
+SAMPLE_WEIGHT = (lambda x: DENSITY_FUNCTION(x) * THRESHOLD_DELTA)
 
 
 # Convert elements of python source code to one-hot token vectors
@@ -200,7 +211,6 @@ def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_t
             capacity=TOTAL_EXAMPLES)
 
     return name_batch, examples_batch, program_batch, length_batch
-
 
 
 # Generate single training batch of python programs
@@ -310,11 +320,11 @@ def initialize_biases_cpu(name, shape):
 def inference_syntax_python(program_batch, length_batch):
 
     # Initialization flag for lstm
-    global LSTM_INITIALIZED
+    global SYNTAX_INITIALIZED
 
 
     # First bidirectional lstm layer
-    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(1)), reuse=LSTM_INITIALIZED) as scope:
+    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(1)), reuse=SYNTAX_INITIALIZED) as scope:
 
         # Define forward and backward rnn layers
         lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
@@ -350,7 +360,7 @@ def inference_syntax_python(program_batch, length_batch):
 
 
     # Second bidirectional lstm layer
-    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(2)), reuse=LSTM_INITIALIZED) as scope:
+    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(2)), reuse=SYNTAX_INITIALIZED) as scope:
 
         # Define forward and backward rnn layers
         lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
@@ -386,19 +396,154 @@ def inference_syntax_python(program_batch, length_batch):
 
 
     # Third attentional dense layer
-    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(3)), reuse=LSTM_INITIALIZED) as scope:
+    with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(3)), reuse=SYNTAX_INITIALIZED) as scope:
 
         # Take linear combination of hidden states and produce syntax label
         linear_w = initialize_weights_cpu(
             (scope.name + EXTENSION_WEIGHTS), 
             [DATASET_MAXIMUM, LSTM_SIZE*2])
-        linear_b = initialize_biases_cpu((scope.name + EXTENSION_BIASES), [1])
+        linear_b = initialize_biases_cpu(
+            (scope.name + EXTENSION_BIASES), 
+            [1])
         logits = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
 
     
     # LSTM has been computed at least once, return calculation node
-    LSTM_INITIALIZED = True
+    SYNTAX_INITIALIZED = True
     return logits
+
+
+# Compute behavior function with brnn
+def inference_behavior_python(program_batch, length_batch):
+
+    # Initialization flag for lstm
+    global BEHAVIOR_INITIALIZED
+
+
+    # First bidirectional lstm layer
+    with tf.variable_scope((PREFIX_BEHAVIOR + EXTENSION_NUMBER(1)), reuse=BEHAVIOR_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=1.0, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=1.0, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            program_batch,
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+    # Second bidirectional lstm layer
+    with tf.variable_scope((PREFIX_BEHAVIOR + EXTENSION_NUMBER(2)), reuse=BEHAVIOR_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            tf.concat(output_batch, 2),
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+    # Third attentional dense layer
+    with tf.variable_scope((PREFIX_BEHAVIOR + EXTENSION_NUMBER(3)), reuse=BEHAVIOR_INITIALIZED) as scope:
+
+        # Take linear combination of hidden states and produce behavior coefficients
+        linear_w = initialize_weights_cpu(
+            (scope.name + EXTENSION_WEIGHTS), 
+            [DATASET_MAXIMUM, (LSTM_SIZE * 2), (BEHAVIOR_ORDER + 1)])
+        linear_b = initialize_biases_cpu(
+            (scope.name + EXTENSION_BIASES), 
+            [(BEHAVIOR_ORDER + 1)])
+        coefficients = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+
+    
+    # LSTM has been computed at least once
+    BEHAVIOR_INITIALIZED = True
+
+
+    # Compute expected output given input example
+    def behavior_function(input_examples):
+
+        # Prepare input power series
+        input_example = tf.expand_dims(input_examples, COEFFICIENT_PIVOT)
+        power_factor = tf.ones(input_example.shape)
+        power_series = power_factor
+
+
+        # Concatenate higher powers of input
+        for i in range(BEHAVIOR_ORDER):
+
+            # Calculate current power order
+            power_factor *= input_example
+
+
+            # Append to power series
+            power_series = tf.concat([power_series, power_factor], COEFFICIENT_PIVOT)
+
+        return tf.reduce_sum(
+            (power_series * tf.tile(
+                tf.expand_dims(coefficients, IO_EXAMPLE_PIVOT), 
+                [DATASET_IO_EXAMPLES if (i == IO_EXAMPLE_PIVOT) else 1 for i in range(3)])), 
+            axis=COEFFICIENT_PIVOT)
+
+    return behavior_function
+
+
+# Utility function to reset graph
+def reset_graph():
+
+    # Reset lstm kernel
+    global SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED
+    SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED = None, None
+
 
 
 # Compute loss for syntax discriminator
@@ -409,10 +554,9 @@ def loss(prediction, labels):
 
 
     # Calculate the mean loss across batch
-    huber_loss_mean = tf.reduce_mean(huber_loss)
-    tf.add_to_collection(COLLECTION_LOSSES, huber_loss_mean)
+    tf.add_to_collection(COLLECTION_LOSSES, huber_loss)
 
-    return huber_loss_mean
+    return huber_loss
 
 
 # Compute loss gradient and update parameters
@@ -442,20 +586,14 @@ def train(total_loss):
 
 
 # Run single training cycle on dataset
-def train_epf_5(num_epoch=1):
+def train_epf_5(num_epochs=1):
 
     # Reset lstm kernel
-    global LSTM_INITIALIZED
-    LSTM_INITIALIZED = None
-
-
-    # Watch compute time per batch
-    from time import time
-    from datetime import datetime
+    reset_graph()
 
 
     # Convert epoch to batch steps
-    num_steps = num_epoch * EPOCH_SIZE
+    num_steps = num_epochs * EPOCH_SIZE
 
 
     # Create new graph
@@ -469,11 +607,31 @@ def train_epf_5(num_epoch=1):
         mutated_batch = get_mutated_batch(program_batch)
 
 
-        # Compute syntax of original and mutated code
+        # Compute syntax of original source code
         syntax_batch = inference_syntax_python(program_batch, length_batch)
-        mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
         syntax_loss = loss(syntax_batch, tf.constant([1. for i in range(BATCH_SIZE)], tf.float32))
+
+
+        # Compute syntax of mutated source code
+        mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
         mutated_syntax_loss = loss(mutated_syntax_batch, tf.constant([0. for i in range(BATCH_SIZE)], tf.float32))
+
+
+        # Slice examples into input output
+        input_examples_batch = tf.strided_slice(examples_batch, [0, 0], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
+        output_examples_batch = tf.strided_slice(examples_batch, [0, 1], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
+
+
+        # Compute behavior function of original code
+        behavior_batch = inference_behavior_python(program_batch, length_batch)
+        behavior_prediction = behavior_batch(input_examples_batch)
+        behavior_loss = loss(behavior_prediction, output_examples_batch)
+
+
+        # Compute behavior function of mutated code
+        mutated_behavior_batch = inference_behavior_python(mutated_batch, length_batch)
+        mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
+        mutated_behavior_loss = loss(mutated_behavior_prediction, output_examples_batch)
 
 
         # Obtain total loss of entire model
@@ -482,8 +640,6 @@ def train_epf_5(num_epoch=1):
 
 
         # Store datapoints each epoch for plot
-        loss_points = []
-        iteration_points = []
 
 
         # Report testing progress
@@ -493,13 +649,15 @@ def train_epf_5(num_epoch=1):
             def begin(self):
                 self.current_step = 0
                 self.batch_speed = 0
+                self.loss_points = []
+                self.iteration_points = []
 
 
             # Just before inference
             def before_run(self, run_context):
                 self.current_step += 1
                 self.start_time = time()
-                return tf.train.SessionRunArgs([syntax_batch, total_loss])
+                return tf.train.SessionRunArgs(total_loss)
 
 
             # Just after inference
@@ -513,7 +671,7 @@ def train_epf_5(num_epoch=1):
                 if (self.current_step % 10 == 0):
 
                     # Obtain graph results
-                    syntax_value, loss_value = run_values.results
+                    loss_value = run_values.results
 
 
                     # Display date, batch speed, estimated time, loss, and accuracy
@@ -527,12 +685,16 @@ def train_epf_5(num_epoch=1):
 
 
                     # Record current loss
-                    loss_points.append(loss_value)
-                    iteration_points.append(self.current_step)
+                    self.loss_points.append(loss_value)
+                    self.iteration_points.append(self.current_step)
 
 
         # Prepare to save and load models
         model_saver = tf.train.Saver()
+
+
+        # Track datapoints as testing progresses
+        data_saver = LogProgressHook()
 
 
         # Perform computation cycle based on graph
@@ -542,7 +704,7 @@ def train_epf_5(num_epoch=1):
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
                 saver=model_saver),
-            LogProgressHook()]) as session:
+            data_saver]) as session:
 
             # Repeat training iteratively
             while not session.should_stop():
@@ -551,12 +713,12 @@ def train_epf_5(num_epoch=1):
                 gradient_value = session.run(gradient_batch)
 
 
-     # Construct and save plot
-    import matplotlib.pyplot as plt
-    plt.scatter(iteration_points, loss_points)
+    # Construct and save training loss plot
+    plt.scatter(data_saver.iteration_points, data_saver.loss_points)
     plt.xlabel("Batch Iteration")
-    plt.ylabel("Mean Huber Syntax Loss")
-    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_training_loss.png")
+    plt.ylabel("Mean Huber Loss")
+    plt.yscale("log")
+    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_training_loss.png")
     plt.close()
 
 
@@ -564,12 +726,7 @@ def train_epf_5(num_epoch=1):
 def test_epf_5(model_checkpoint):
 
     # Reset lstm kernel
-    global LSTM_INITIALIZED
-    LSTM_INITIALIZED = None
-
-
-    # Check current date and time
-    from datetime import datetime
+    reset_graph()
 
 
     # Create new graph
@@ -588,17 +745,33 @@ def test_epf_5(model_checkpoint):
         mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
 
 
+        # Slice examples into input output
+        input_examples_batch = tf.strided_slice(examples_batch, [0, 0], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
+        output_examples_batch = tf.strided_slice(examples_batch, [0, 1], [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], strides=[1, 2])
+
+
+        # Compute behavior function of original code
+        behavior_batch = inference_behavior_python(program_batch, length_batch)
+        behavior_prediction = behavior_batch(input_examples_batch)
+        behavior_loss = behavior_prediction - output_examples_batch
+
+
+        # Compute behavior function of mutated code
+        mutated_behavior_batch = inference_behavior_python(mutated_batch, length_batch)
+        mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
+        mutated_behavior_loss = mutated_behavior_prediction - output_examples_batch
+
+
         # Group the previous operations
-        group_batch = tf.group(syntax_batch, mutated_syntax_batch)
+        group_batch = tf.group(
+            syntax_batch, 
+            mutated_syntax_batch,
+            behavior_loss,
+            mutated_behavior_loss)
 
 
-        # Store datapoints for precision and recall measures
-        precision_points = []
-        recall_points = []
-
-
-        # Binary classification decision boundary for precisio recall
-        DECISION_THRESHOLD = DECISION_LOWER_BOUND
+        # Binary classification decision boundary for precision recall
+        SYNTAX_THRESHOLD = THRESHOLD_LOWER
 
 
         # Report testing progress
@@ -607,24 +780,32 @@ def test_epf_5(model_checkpoint):
             
             # Session is initialized
             def begin(self):
-                self.weighted_accuracy = 0.0
+                self.syntax_accuracy = 0.0
+                self.error_mean = np.zeros((DATASET_IO_EXAMPLES))
+                self.error_std = np.zeros((DATASET_IO_EXAMPLES))
+                self.precision_points = []
+                self.recall_points = []
 
 
             # Just before inference
             def before_run(self, run_context):
-                return tf.train.SessionRunArgs([syntax_batch, mutated_syntax_batch])
+                return tf.train.SessionRunArgs([
+                    syntax_batch, 
+                    mutated_syntax_batch,
+                    behavior_loss,
+                    mutated_behavior_loss])
 
 
             # Just after inference
             def after_run(self, run_context, run_values):
 
                 # Obtain graph results
-                syntax_value, mutated_value = run_values.results
+                syntax_value, mutated_value, behavior_loss_value, mutated_loss_value = run_values.results
 
 
                 # Calculations for precision and recall
-                false_positives = sum([1. for element in mutated_value if element >= DECISION_THRESHOLD])
-                false_negatives = sum([1. for element in syntax_value if element <= DECISION_THRESHOLD])
+                false_positives = sum([1. for element in mutated_value if element >= SYNTAX_THRESHOLD])
+                false_negatives = sum([1. for element in syntax_value if element <= SYNTAX_THRESHOLD])
 
 
                 # Calculate precision metric true_positive/(true_positive + false_positive)
@@ -636,50 +817,72 @@ def test_epf_5(model_checkpoint):
 
 
                 # Calculate the accuracy at this decision threshold
-                current_accuracy = (BATCH_SIZE * 2 - false_positives - false_negatives) / (BATCH_SIZE * 2)
-                self.weighted_accuracy += DECISION_WEIGHT(DECISION_THRESHOLD) * current_accuracy
+                current_syntax_accuracy = (BATCH_SIZE * 2 - false_positives - false_negatives) / (BATCH_SIZE * 2)
+                self.syntax_accuracy += SAMPLE_WEIGHT(SYNTAX_THRESHOLD) * current_syntax_accuracy
+
+
+                # Calculate mean and standard deviation of behavior error
+                self.error_mean += behavior_loss_value.mean(axis=0) / (THRESHOLD_RANGE + 1)
+                self.error_std += behavior_loss_value.std(axis=0) / (THRESHOLD_RANGE + 1)
 
 
                 # Print result for verification
                 print(
-                    "Threshold: %.2f" % DECISION_THRESHOLD, 
+                    "SYNTAX |",
+                    "Threshold: %.2f" % SYNTAX_THRESHOLD,
                     "Precision: %.2f" % precision, 
-                    "Recall: %.2f" % recall, 
-                    "Weighted Accurary: %.2f" % self.weighted_accuracy)
+                    "Recall: %.2f" % recall,
+                    "Accurary: %.2f" % self.syntax_accuracy)
+                print(
+                    "BEHAVIOR |",
+                    "Error Mean: %.2f" % self.error_mean.mean(),
+                    "Error STD: %.2f" % self.error_std.mean())
+                print("")
 
 
                 # Record current precision recall
-                precision_points.append(precision)
-                recall_points.append(recall)
+                self.precision_points.append(precision)
+                self.recall_points.append(recall)
 
 
         # Prepare to save and load models
         model_saver = tf.train.Saver()
 
 
+        # Track datapoints as testing progresses
+        data_saver = LogProgressHook()
+
+
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            LogProgressHook()]) as session:
+            data_saver]) as session:
 
             # Load progress from checkpoint
             model_saver.restore(session, model_checkpoint)
 
 
             # Repeat testing iteratively for varying decision thresholds
-            for i in range(DECISION_RANGE + 1):
+            for i in range(THRESHOLD_RANGE + 1):
 
                 # Run single batch of testing
-                _ = session.run(group_batch)
+                session.run(group_batch)
 
                 
                 # Calculate new decision threshold
-                DECISION_THRESHOLD += (DECISION_UPPER_BOUND/DECISION_RANGE)
+                SYNTAX_THRESHOLD += THRESHOLD_DELTA
 
 
-     # Construct and save plot
-    import matplotlib.pyplot as plt
-    plt.scatter(recall_points, precision_points)
+     # Construct and precision recall save plot
+    plt.scatter(data_saver.recall_points, data_saver.precision_points)
     plt.xlabel("Recall")
     plt.ylabel("Precision")
-    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_syntax_precision_recall.png")
+    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_precision_recall.png")
+    plt.close()
+
+
+    # Construct and save behavior error plot
+    plt.errorbar(np.arange(10), data_saver.error_mean, yerr=data_saver.error_std, fmt="--o", ecolor="g", capsize=10)
+    plt.xlabel("IO Example")
+    plt.ylabel("Behavior Error")
+    plt.savefig(datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + "_behavior_error.png")
     plt.close()
