@@ -1,4 +1,4 @@
 *.ini
 *.png
-*.git
-*.vs
+**/.git
+**/.vs
