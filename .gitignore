@@ -2,3 +2,7 @@
 *.png
 **/.git
 **/.vs
+**/Documents
+**/References
+**/Datasets
+**/Checkpoints
