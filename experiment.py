@@ -188,7 +188,7 @@ def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_t
             batch_size=batch_size,
             num_threads=num_threads,
             capacity=TOTAL_EXAMPLES,
-            min_after_dequeue=(TOTAL_EXAMPLES // 1000))
+            min_after_dequeue=TOTAL_EXAMPLES)
 
 
     # Preserve order of batch
@@ -532,19 +532,19 @@ def inference_behavior(program_batch, length_batch):
         # Compute hypernet behavior function
         for i in range(BEHAVIOR_DEPTH + 2):
             
-            # Reshape previous activation to align elementwise multiplication [64, 10, 1, 16]
+            # Reshape previous activation to align elementwise multiplication
             activation = tf.tile(tf.expand_dims(activation, -1), [1, 1, 1, BEHAVIOR_TOPOLOGY[i][-1]])
 
 
-            # Reshape weights to align elementwise multipliction [64, 10, 1, 16]
+            # Reshape weights to align elementwise multipliction
             weights = tf.tile(tf.expand_dims(hypernet_w[i], 1), [1, DATASET_IO_EXAMPLES, 1, 1])
 
 
-            # Reshape biases to align elementwise addition [64, 10, 16]
+            # Reshape biases to align elementwise addition
             biases = tf.tile(tf.expand_dims(hypernet_b[i], 1), [1, DATASET_IO_EXAMPLES, 1])
 
 
-            # Compute batch-example wise tensor product and relu activation [64, 10, 16], dead relu offset
+            # Compute batch-example wise tensor product and relu activation, dead relu offset
             activation = tf.nn.relu(tf.reduce_sum(activation * weights, axis=2) + biases + 10.0)
 
         return tf.reshape(activation, [BATCH_SIZE, DATASET_IO_EXAMPLES])
@@ -711,7 +711,7 @@ def train_epf_5(num_epochs=1):
                         "REM: %d" % (num_steps - current_step),
                         "SPD: %.2f bat/sec" % batch_speed,
                         "ETA: %.2f hrs" % ((num_steps - current_step) / batch_speed / 60 / 60),
-                        "L: %.2f" % loss_value)
+                        "LOSS: %.2f" % loss_value)
 
 
                     # Record current loss
@@ -870,8 +870,8 @@ def test_epf_5(model_checkpoint):
 
 
                 # Calculate mean and standard deviation of behavior error
-                self.error_mean += behavior_loss_value.mean(axis=0) / (THRESHOLD_RANGE + 1)
-                self.error_std += behavior_loss_value.std(axis=0) / (THRESHOLD_RANGE + 1)
+                self.error_mean += behavior_loss_value.mean(axis=0) / THRESHOLD_RANGE 
+                self.error_std += behavior_loss_value.std(axis=0) / THRESHOLD_RANGE
 
 
                 # Print result for verification
