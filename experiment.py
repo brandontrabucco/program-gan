@@ -104,14 +104,14 @@ SAMPLE_WEIGHT = (lambda x: DENSITY_FUNCTION(x) * THRESHOLD_DELTA)
 
 
 # Convert elements of python source code to one-hot token vectors
-def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULARY):
+def tokenize_program(program, vocabulary=DATASET_VOCABULARY):
 
     # List allowed characters
     mapping_characters = tf.string_split([vocabulary], delimiter="")
 
 
     # List characters in each word
-    input_characters = tf.string_split([source_code_python], delimiter="")
+    input_characters = tf.string_split([program], delimiter="")
 
 
     # Create integer lookup table
@@ -132,18 +132,18 @@ def tokenize_source_code_python(source_code_python, vocabulary=DATASET_VOCABULAR
     return tf.reshape(expanded_tensor, [DATASET_MAXIMUM, len(vocabulary)]), actual_length
 
 
-def detokenize_source_code_python(one_hot_tensor, vocabulary=DATASET_VOCABULARY):
+def detokenize_program(program, vocabulary=DATASET_VOCABULARY):
 
     # List allowed characters
     mapping_characters = tf.string_split([vocabulary], delimiter="")
 
 
     # Select one hot index
-    indices = tf.argmax(one_hot_tensor, axis=2)
+    indices = tf.argmax(program, axis=2)
 
 
     # Create integer lookup table
-    lookup_table = tf.contrib.lookup.index_to_string_table_from_tensor(mapping_characters.values, default_value="UNKNOWN")
+    lookup_table = tf.contrib.lookup.index_to_string_table_from_tensor(mapping_characters.values, default_value=DATASET_DEFAULT)
 
 
     # Lookup corrosponding string
@@ -153,7 +153,7 @@ def detokenize_source_code_python(one_hot_tensor, vocabulary=DATASET_VOCABULARY)
 
 
 # Read single row words
-def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_value=DATASET_DEFAULT):
+def decode_record(filename_queue, num_columns=DATASET_COLUMNS, default_value=DATASET_DEFAULT):
 
     # Attach text file reader
     DATASET_READER = tf.TextLineReader(skip_header_lines=1)
@@ -172,7 +172,7 @@ def decode_record_python(filename_queue, num_columns=DATASET_COLUMNS, default_va
 
 
     # Convert python code to tokenized one-hot vectors
-    program_tensor, actual_length = tokenize_source_code_python(function_column)
+    program_tensor, actual_length = tokenize_program(function_column)
 
     return name_column, example_columns, program_tensor, actual_length
 
@@ -206,14 +206,14 @@ def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_t
 
 
 # Generate single training batch of python programs
-def training_batch_python():
+def get_training_batch():
 
     # A queue to generate batches
     filename_queue = tf.train.string_input_producer(DATASET_FILENAMES_PYTHON)
 
 
     # Decode from string to floating point
-    name, examples, program, length = decode_record_python(filename_queue)
+    name, examples, program, length = decode_record(filename_queue)
 
 
     # Combine example queue into batch
@@ -223,7 +223,7 @@ def training_batch_python():
 
 
 # Creates a mutated program batch
-def get_mutated_batch(program_batch):
+def mutate_program_batch(program_batch):
 
     # Generate mutation indices for each character tensor
     batch_mutations = tf.random_uniform(
@@ -309,7 +309,7 @@ def initialize_biases_cpu(name, shape):
 
 
 # Compute syntax label with brnn
-def inference_syntax_python(program_batch, length_batch):
+def inference_syntax(program_batch, length_batch):
 
     # Initialization flag for lstm
     global SYNTAX_INITIALIZED
@@ -406,7 +406,7 @@ def inference_syntax_python(program_batch, length_batch):
 
 
 # Compute behavior function with brnn
-def inference_behavior_python(program_batch, length_batch):
+def inference_behavior(program_batch, length_batch):
 
     # Initialization flag for lstm
     global BEHAVIOR_INITIALIZED
@@ -549,7 +549,7 @@ def inference_behavior_python(program_batch, length_batch):
             biases = tf.tile(tf.expand_dims(hypernet_b[i], 1), [1, DATASET_IO_EXAMPLES, 1])
 
 
-            # Compute batch-example wise tensor product and relu activation [64, 10, 16]
+            # Compute batch-example wise tensor product and relu activation [64, 10, 16], dead relu offset
             activation = tf.nn.relu(tf.reduce_sum(pre_activation * weights, axis=2) + biases + 10.0)
 
         return tf.reshape(activation, [BATCH_SIZE, DATASET_IO_EXAMPLES])
@@ -558,7 +558,7 @@ def inference_behavior_python(program_batch, length_batch):
 
 
 # Utility function reset initialization flags
-def reset_graph():
+def reset_kernel():
 
     # Reset lstm kernel
     global SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED
@@ -608,7 +608,7 @@ def train(total_loss):
 def train_epf_5(num_epochs=1):
 
     # Reset lstm kernel
-    reset_graph()
+    reset_kernel()
 
 
     # Convert epoch to batch steps
@@ -619,22 +619,22 @@ def train_epf_5(num_epochs=1):
     with tf.Graph().as_default():
 
         # Compute single training batch
-        name_batch, examples_batch, program_batch, length_batch = training_batch_python()
+        name_batch, examples_batch, program_batch, length_batch = get_training_batch()
 
 
         # Obtain character mutations of programs
-        mutated_batch = get_mutated_batch(program_batch)
+        mutated_batch = mutate_program_batch(program_batch)
 
 
         # Compute syntax of original source code
-        syntax_batch = inference_syntax_python(program_batch, length_batch)
+        syntax_batch = inference_syntax(program_batch, length_batch)
         syntax_loss = loss(
             syntax_batch, 
             tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32))
 
 
         # Compute syntax of mutated source code
-        mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
+        mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
         mutated_syntax_loss = loss(
             mutated_syntax_batch, 
             tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32))
@@ -651,17 +651,16 @@ def train_epf_5(num_epochs=1):
             [0, 1], 
             [BATCH_SIZE, (DATASET_IO_EXAMPLES * 2)], 
             strides=[1, 2])
-        print(input_examples_batch.shape)
 
 
         # Compute behavior function of original code
-        behavior_batch = inference_behavior_python(program_batch, length_batch)
+        behavior_batch = inference_behavior(program_batch, length_batch)
         behavior_prediction = behavior_batch(input_examples_batch)
         behavior_loss = loss(behavior_prediction, output_examples_batch)
 
 
         # Compute behavior function of mutated code
-        mutated_behavior_batch = inference_behavior_python(mutated_batch, length_batch)
+        mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
         mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
         mutated_behavior_loss = loss(mutated_behavior_prediction, output_examples_batch)
 
@@ -704,7 +703,7 @@ def train_epf_5(num_epochs=1):
 
 
                 # Update every period of steps
-                if (current_step % (num_steps // LOGGING_SIZE if num_steps > LOGGING_SIZE else 1) == 0):
+                if current_step % max(num_steps // LOGGING_SIZE, 1) == 0:
 
 
                     # Display date, batch speed, estimated time, loss, and accuracy
@@ -765,23 +764,23 @@ def train_epf_5(num_epochs=1):
 def test_epf_5(model_checkpoint):
 
     # Reset lstm kernel
-    reset_graph()
+    reset_kernel()
 
 
     # Create new graph
     with tf.Graph().as_default():
 
         # Compute single training batch
-        name_batch, examples_batch, program_batch, length_batch = training_batch_python()
+        name_batch, examples_batch, program_batch, length_batch = get_training_batch()
 
 
         # Obtain character mutations of programs
-        mutated_batch = get_mutated_batch(program_batch)
+        mutated_batch = mutate_program_batch(program_batch)
 
 
         # Compute syntax of corrected code
-        syntax_batch = inference_syntax_python(program_batch, length_batch)
-        mutated_syntax_batch = inference_syntax_python(mutated_batch, length_batch)
+        syntax_batch = inference_syntax(program_batch, length_batch)
+        mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
 
 
         # Slice examples into input output
@@ -798,13 +797,13 @@ def test_epf_5(model_checkpoint):
 
 
         # Compute behavior function of original code
-        behavior_batch = inference_behavior_python(program_batch, length_batch)
+        behavior_batch = inference_behavior(program_batch, length_batch)
         behavior_prediction = behavior_batch(input_examples_batch)
         behavior_loss = behavior_prediction - output_examples_batch
 
 
         # Compute behavior function of mutated code
-        mutated_behavior_batch = inference_behavior_python(mutated_batch, length_batch)
+        mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
         mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
         mutated_behavior_loss = mutated_behavior_prediction - output_examples_batch
 
@@ -845,6 +844,10 @@ def test_epf_5(model_checkpoint):
 
             # Just after inference
             def after_run(self, run_context, run_values):
+
+                # Increment threshold after calculation
+                nonlocal SYNTAX_THRESHOLD
+
 
                 # Obtain graph results
                 syntax_value, mutated_value, behavior_loss_value, mutated_loss_value = run_values.results
@@ -888,6 +891,10 @@ def test_epf_5(model_checkpoint):
                 self.precision_points.append(precision)
                 self.recall_points.append(recall)
 
+                
+                # Calculate new decision threshold
+                SYNTAX_THRESHOLD += THRESHOLD_DELTA
+
 
         # Prepare to save and load models
         model_saver = tf.train.Saver()
@@ -911,12 +918,8 @@ def test_epf_5(model_checkpoint):
                 # Run single batch of testing
                 session.run(group_batch)
 
-                
-                # Calculate new decision threshold
-                SYNTAX_THRESHOLD += THRESHOLD_DELTA
 
-
-     # Construct and precision recall save plot
+    # Construct and precision recall save plot
     plt.plot(
         data_saver.recall_points, 
         data_saver.precision_points,
