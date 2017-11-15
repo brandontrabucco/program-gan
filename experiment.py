@@ -67,9 +67,9 @@ EXTENSION_BIASES = "_biases"
 
 
 # Collection nomenclature
-COLLECTION_LOSSES = "losses"
-COLLECTION_PARAMETERS = "parameters"
-COLLECTION_ACTIVATIONS = "activations"
+COLLECTION_LOSSES = "_losses"
+COLLECTION_PARAMETERS = "_parameters"
+COLLECTION_ACTIVATIONS = "_activations"
 
 
 # LSTM structural hyperparameters
@@ -264,7 +264,7 @@ def mutate_program_batch(program_batch):
 
 
 # Initialize trainable parameters
-def initialize_weights_cpu(name, shape, standard_deviation=0.01, decay_factor=None):
+def initialize_weights_cpu(name, shape, standard_deviation=0.01, decay_factor=None, collection=None):
 
     # Force usage of cpu
     with tf.device("/cpu:0"):
@@ -279,14 +279,14 @@ def initialize_weights_cpu(name, shape, standard_deviation=0.01, decay_factor=No
             dtype=tf.float32)
 
     # Add weight decay to loss function
-    if decay_factor is not None:
+    if decay_factor is not None and collection is not None:
 
         # Calculate decay with l2 loss
         weight_decay = tf.multiply(
             tf.nn.l2_loss(weights),
             decay_factor,
             name=(name + EXTENSION_LOSS))
-        tf.add_to_collection(COLLECTION_LOSSES, weight_decay)
+        tf.add_to_collection(collection, weight_decay)
 
     return weights
 
@@ -350,6 +350,11 @@ def inference_syntax(program_batch, length_batch):
             dtype=tf.float32)
 
 
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), parameters)
+
+
     # Second bidirectional lstm layer
     with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(2)), reuse=SYNTAX_INITIALIZED) as scope:
 
@@ -386,6 +391,11 @@ def inference_syntax(program_batch, length_batch):
             dtype=tf.float32)
 
 
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), parameters)
+
+
     # Third attentional dense layer
     with tf.variable_scope((PREFIX_SYNTAX + EXTENSION_NUMBER(3)), reuse=SYNTAX_INITIALIZED) as scope:
 
@@ -397,6 +407,11 @@ def inference_syntax(program_batch, length_batch):
             (scope.name + EXTENSION_BIASES), 
             [1])
         output_batch = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+
+
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), parameters)
 
     
     # LSTM has been computed at least once, return calculation node
@@ -447,6 +462,11 @@ def inference_behavior(program_batch, length_batch):
             dtype=tf.float32)
 
 
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), parameters)
+
+
     # Second bidirectional lstm layer
     with tf.variable_scope((PREFIX_BEHAVIOR + EXTENSION_NUMBER(2)), reuse=BEHAVIOR_INITIALIZED) as scope:
 
@@ -481,6 +501,11 @@ def inference_behavior(program_batch, length_batch):
             initial_state_bw=initial_state_bw,
             sequence_length=length_batch,
             dtype=tf.float32)
+
+
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), parameters)
 
 
     # Third attentional dense layer
@@ -522,6 +547,11 @@ def inference_behavior(program_batch, length_batch):
             hypernet_b.append(biases)
 
 
+            # Add parameters to collection for training
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), parameters)
+
+
     # Compute expected output given input example
     def behavior_function(input_examples):
 
@@ -558,26 +588,32 @@ def inference_behavior(program_batch, length_batch):
 # Utility function reset initialization flags
 def reset_kernel():
 
-    # Reset lstm kernel
-    global SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED
-    SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED = None, None
+    # Reset training kernel
+    global SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED, STEP_INCREMENTED
+    SYNTAX_INITIALIZED = None
+    BEHAVIOR_INITIALIZED = None
+    STEP_INCREMENTED = False
 
 
 # Compute loss for syntax discriminator
-def loss(prediction, labels):
+def loss(prediction, labels, collection):
 
     # Calculate huber loss of prediction
     huber_loss = tf.losses.huber_loss(labels, prediction)
 
 
     # Calculate the mean loss across batch
-    tf.add_to_collection(COLLECTION_LOSSES, huber_loss)
+    tf.add_to_collection(collection, huber_loss)
 
     return huber_loss
 
 
 # Compute loss gradient and update parameters
-def train(total_loss):
+def train(loss, parameters):
+    
+    # Initialization flag for global step
+    global STEP_INCREMENTED
+
 
     # Keep track of current training step
     global_step = tf.train.get_or_create_global_step()
@@ -596,9 +632,27 @@ def train(total_loss):
     optimizer = tf.train.AdamOptimizer(learning_rate)
 
 
-    # Minimize loss using optimizer
-    gradient = optimizer.minimize(total_loss, global_step=global_step)
+    # Global step has not yet been incremented
+    if not STEP_INCREMENTED:
 
+        # Minimize loss with respect to parameters, and increment step
+        gradient = optimizer.minimize(
+            loss, 
+            var_list=parameters,
+            global_step=global_step)
+
+
+    # Global step has already been incremented
+    else:
+
+        # Minimize loss with respect to parameters
+        gradient = optimizer.minimize(
+            loss, 
+            var_list=parameters)
+
+
+    # Step has been decremented at least once
+    STEP_INCREMENTED = True
     return gradient
 
 
@@ -628,14 +682,16 @@ def train_epf_5(num_epochs=1):
         syntax_batch = inference_syntax(program_batch, length_batch)
         syntax_loss = loss(
             syntax_batch, 
-            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32))
+            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_SYNTAX + COLLECTION_LOSSES))
 
 
         # Compute syntax of mutated source code
         mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
         mutated_syntax_loss = loss(
             mutated_syntax_batch, 
-            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32))
+            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_SYNTAX + COLLECTION_LOSSES))
 
 
         # Slice examples into input output
@@ -654,24 +710,40 @@ def train_epf_5(num_epochs=1):
         # Compute behavior function of original code
         behavior_batch = inference_behavior(program_batch, length_batch)
         behavior_prediction = behavior_batch(input_examples_batch)
-        behavior_loss = loss(behavior_prediction, output_examples_batch)
+        behavior_loss = loss(
+            behavior_prediction, 
+            output_examples_batch,
+            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
         # Compute behavior function of mutated code
         mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
         mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
-        mutated_behavior_loss = loss(mutated_behavior_prediction, output_examples_batch)
+        mutated_behavior_loss = loss(
+            mutated_behavior_prediction, 
+            output_examples_batch,
+            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
-        # Obtain total loss of entire model
-        total_loss = tf.add_n(
-            tf.get_collection(COLLECTION_LOSSES), 
-            name=(PREFIX_TOTAL + EXTENSION_LOSS))
-        gradient_batch = train(total_loss)
+        # Obtain parameters for syntax and behavior discriminator networks
+        syntax_parameters = tf.get_collection(PREFIX_SYNTAX + COLLECTION_PARAMETERS)
+        behavior_parameters = tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_PARAMETERS)
+
+
+        # Obtain loss for which to minimize with respect to parameters
+        syntax_loss = tf.add_n(tf.get_collection(PREFIX_SYNTAX + COLLECTION_LOSSES))
+        behavior_loss = tf.add_n(tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_LOSSES))
+        total_loss = syntax_loss + behavior_loss
+
+
+        # Calculate gradient for each set of parameters
+        syntax_gradient = train(syntax_loss, syntax_parameters)
+        behavior_gradient = train(behavior_loss, behavior_parameters)
+        gradient_batch = tf.group(syntax_gradient, behavior_gradient)
 
 
         # Report testing progress
-        class LogEpochHook(tf.train.SessionRunHook):
+        class DataSaver(tf.train.SessionRunHook):
 
             # Session is initialized
             def begin(self):
@@ -724,7 +796,7 @@ def train_epf_5(num_epochs=1):
 
 
         # Track datapoints as testing progresses
-        data_saver = LogEpochHook()
+        data_saver = DataSaver()
 
 
         # Perform computation cycle based on graph
@@ -740,7 +812,7 @@ def train_epf_5(num_epochs=1):
             while not session.should_stop():
 
                 # Run single batch of training
-                gradient_value = session.run(gradient_batch)
+                session.run(gradient_batch)
 
 
     # Construct and save training loss plot
@@ -797,21 +869,21 @@ def test_epf_5(model_checkpoint):
         # Compute behavior function of original code
         behavior_batch = inference_behavior(program_batch, length_batch)
         behavior_prediction = behavior_batch(input_examples_batch)
-        behavior_loss = behavior_prediction - output_examples_batch
+        behavior_error = behavior_prediction - output_examples_batch
 
 
         # Compute behavior function of mutated code
         mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
         mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
-        mutated_behavior_loss = mutated_behavior_prediction - output_examples_batch
+        mutated_behavior_error = mutated_behavior_prediction - output_examples_batch
 
 
         # Group the previous operations
         group_batch = tf.group(
             syntax_batch, 
             mutated_syntax_batch,
-            behavior_loss,
-            mutated_behavior_loss)
+            behavior_error,
+            mutated_behavior_error)
 
 
         # Binary classification decision boundary for precision recall
@@ -819,7 +891,7 @@ def test_epf_5(model_checkpoint):
 
 
         # Report testing progress
-        class LogEpochHook(tf.train.SessionRunHook):
+        class DataSaver(tf.train.SessionRunHook):
 
             
             # Session is initialized
@@ -836,8 +908,8 @@ def test_epf_5(model_checkpoint):
                 return tf.train.SessionRunArgs([
                     syntax_batch, 
                     mutated_syntax_batch,
-                    behavior_loss,
-                    mutated_behavior_loss])
+                    behavior_error,
+                    mutated_behavior_error])
 
 
             # Just after inference
@@ -848,7 +920,7 @@ def test_epf_5(model_checkpoint):
 
 
                 # Obtain graph results
-                syntax_value, mutated_value, behavior_loss_value, mutated_loss_value = run_values.results
+                syntax_value, mutated_value, behavior_error_value, mutated_error_value = run_values.results
 
 
                 # Calculations for precision and recall
@@ -870,8 +942,10 @@ def test_epf_5(model_checkpoint):
 
 
                 # Calculate mean and standard deviation of behavior error
-                self.error_mean += behavior_loss_value.mean(axis=0) / THRESHOLD_RANGE 
-                self.error_std += behavior_loss_value.std(axis=0) / THRESHOLD_RANGE
+                self.error_mean += behavior_error_value.mean(axis=0) / THRESHOLD_RANGE 
+                self.error_mean += mutated_error_value.mean(axis=0) / THRESHOLD_RANGE 
+                self.error_std += behavior_error_value.std(axis=0) / THRESHOLD_RANGE
+                self.error_std += mutated_error_value.std(axis=0) / THRESHOLD_RANGE
 
 
                 # Print result for verification
@@ -899,7 +973,7 @@ def test_epf_5(model_checkpoint):
 
 
         # Track datapoints as testing progresses
-        data_saver = LogEpochHook()
+        data_saver = DataSaver()
 
 
         # Perform computation cycle based on graph
