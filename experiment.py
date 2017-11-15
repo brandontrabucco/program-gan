@@ -416,7 +416,7 @@ def inference_syntax(program_batch, length_batch):
     
     # LSTM has been computed at least once, return calculation node
     SYNTAX_INITIALIZED = True
-    return output_batch
+    return tf.reshape(output_batch, [BATCH_SIZE])
 
 
 # Compute behavior function with brnn
@@ -585,13 +585,132 @@ def inference_behavior(program_batch, length_batch):
     return behavior_function
 
 
+# Compute generated program with brnn
+def inference_generator(program_batch, length_batch):
+
+    # Initialization flag for lstm
+    global GENERATOR_INITIALIZED
+
+
+    # First bidirectional lstm layer
+    with tf.variable_scope((PREFIX_GENERATOR + EXTENSION_NUMBER(1)), reuse=GENERATOR_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=1.0, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=1.0, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            program_batch,
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), parameters)
+
+
+    # Second bidirectional lstm layer
+    with tf.variable_scope((PREFIX_GENERATOR + EXTENSION_NUMBER(2)), reuse=GENERATOR_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            tf.concat(output_batch, 2),
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), parameters)
+
+
+    # Third attentional dense layer
+    with tf.variable_scope((PREFIX_GENERATOR + EXTENSION_NUMBER(3)), reuse=GENERATOR_INITIALIZED) as scope:
+
+        # Take linear combination of hidden states and produce syntax label
+        linear_w = initialize_weights_cpu(
+            (scope.name + EXTENSION_WEIGHTS), 
+            [DATASET_MAXIMUM, LSTM_SIZE*2, DATASET_MAXIMUM, VOCAB_SIZE])
+        linear_b = initialize_biases_cpu(
+            (scope.name + EXTENSION_BIASES), 
+            [DATASET_MAXIMUM, VOCAB_SIZE])
+        output_batch = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+
+
+        # Add parameters to collection for training
+        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+        tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), parameters)
+
+    
+    # LSTM has been computed at least once, return calculation node
+    GENERATOR_INITIALIZED = True
+    return tf.reshape(output_batch, [BATCH_SIZE, DATASET_MAXIMUM, VOCAB_SIZE])
+
+
 # Utility function reset initialization flags
 def reset_kernel():
 
-    # Reset training kernel
-    global SYNTAX_INITIALIZED, BEHAVIOR_INITIALIZED, STEP_INCREMENTED
+    # Define global kernal states
+    global SYNTAX_INITIALIZED
+    global BEHAVIOR_INITIALIZED
+    global GENERATOR_INITIALIZED
+    global STEP_INCREMENTED
+
+
+    # Assign states to initial empty
     SYNTAX_INITIALIZED = None
     BEHAVIOR_INITIALIZED = None
+    GENERATOR_INITIALIZED = None
     STEP_INCREMENTED = False
 
 
@@ -725,20 +844,62 @@ def train_epf_5(num_epochs=1):
             (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
+        # Calculate the corrected code with generator
+        generated_batch = inference_generator(program_batch, length_batch)
+        mutated_generated_batch = inference_generator(mutated_batch, length_batch)
+
+
+        # Compute syntax classification of generated program
+        syntax_generated_batch = inference_syntax(generated_batch, length_batch)
+        syntax_generated_loss = loss(
+            syntax_generated_batch, 
+            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+
+
+        # Compute syntax classification of generated program from mutated input
+        syntax_mutated_generated_batch = inference_syntax(mutated_generated_batch, length_batch)
+        syntax_mutated_generated_loss = loss(
+            syntax_mutated_generated_batch, 
+            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+
+
+        # Compute the behavior of generated program
+        behavior_generated_batch = inference_behavior(generated_batch, length_batch)
+        behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
+        behavior_generated_loss = loss(
+            behavior_generated_prediction, 
+            behavior_prediction,
+            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+
+
+        # Compute the behavior of generated program from mutated input
+        behavior_mutated_generated_batch = inference_behavior(mutated_generated_batch, length_batch)
+        behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
+        behavior_mutated_generated_loss = loss(
+            behavior_mutated_generated_prediction, 
+            mutated_behavior_prediction,
+            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+
+
         # Obtain parameters for syntax and behavior discriminator networks
         syntax_parameters = tf.get_collection(PREFIX_SYNTAX + COLLECTION_PARAMETERS)
         behavior_parameters = tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_PARAMETERS)
+        generator_parameters = tf.get_collection(PREFIX_GENERATOR + COLLECTION_PARAMETERS)
 
 
         # Obtain loss for which to minimize with respect to parameters
         syntax_loss = tf.add_n(tf.get_collection(PREFIX_SYNTAX + COLLECTION_LOSSES))
         behavior_loss = tf.add_n(tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_LOSSES))
-        total_loss = syntax_loss + behavior_loss
+        generator_loss = tf.add_n(tf.get_collection(PREFIX_GENERATOR + COLLECTION_LOSSES))
+        total_loss = syntax_loss + behavior_loss + generator_loss
 
 
         # Calculate gradient for each set of parameters
         syntax_gradient = train(syntax_loss, syntax_parameters)
         behavior_gradient = train(behavior_loss, behavior_parameters)
+        generator_gradient = train(generator_loss, generator_parameters)
         gradient_batch = tf.group(syntax_gradient, behavior_gradient)
 
 
@@ -878,12 +1039,24 @@ def test_epf_5(model_checkpoint):
         mutated_behavior_error = mutated_behavior_prediction - output_examples_batch
 
 
+        # Calculate the corrected code with generator
+        generated_batch = inference_generator(program_batch, length_batch)
+        generated_string = detokenize_program(generated_batch)
+
+
+        # Calculate the corrected code with generator from mutated input
+        mutated_generated_batch = inference_generator(mutated_batch, length_batch)
+        mutated_generated_string = detokenize_program(mutated_generated_batch)
+
+
         # Group the previous operations
         group_batch = tf.group(
             syntax_batch, 
             mutated_syntax_batch,
             behavior_error,
-            mutated_behavior_error)
+            mutated_behavior_error,
+            generated_string,
+            mutated_generated_string)
 
 
         # Binary classification decision boundary for precision recall
@@ -901,6 +1074,7 @@ def test_epf_5(model_checkpoint):
                 self.error_std = np.zeros((DATASET_IO_EXAMPLES))
                 self.precision_points = []
                 self.recall_points = []
+                self.generated_programs = []
 
 
             # Just before inference
@@ -909,7 +1083,9 @@ def test_epf_5(model_checkpoint):
                     syntax_batch, 
                     mutated_syntax_batch,
                     behavior_error,
-                    mutated_behavior_error])
+                    mutated_behavior_error,
+                    generated_string,
+                    mutated_generated_string])
 
 
             # Just after inference
@@ -920,11 +1096,11 @@ def test_epf_5(model_checkpoint):
 
 
                 # Obtain graph results
-                syntax_value, mutated_value, behavior_error_value, mutated_error_value = run_values.results
+                syntax_value, mutated_syntax_value, behavior_value, mutated_behavior_value, generated_value, mutated_generated_value = run_values.results
 
 
                 # Calculations for precision and recall
-                false_positives = sum([1. for element in mutated_value if element >= SYNTAX_THRESHOLD])
+                false_positives = sum([1. for element in mutated_syntax_value if element >= SYNTAX_THRESHOLD])
                 false_negatives = sum([1. for element in syntax_value if element <= SYNTAX_THRESHOLD])
 
 
@@ -940,12 +1116,29 @@ def test_epf_5(model_checkpoint):
                 current_syntax_accuracy = (BATCH_SIZE * 2 - false_positives - false_negatives) / (BATCH_SIZE * 2)
                 self.syntax_accuracy += SAMPLE_WEIGHT(SYNTAX_THRESHOLD) * current_syntax_accuracy
 
+                
+                # Record current precision recall
+                self.precision_points.append(precision)
+                self.recall_points.append(recall)
+
 
                 # Calculate mean and standard deviation of behavior error
-                self.error_mean += behavior_error_value.mean(axis=0) / THRESHOLD_RANGE 
-                self.error_mean += mutated_error_value.mean(axis=0) / THRESHOLD_RANGE 
-                self.error_std += behavior_error_value.std(axis=0) / THRESHOLD_RANGE
-                self.error_std += mutated_error_value.std(axis=0) / THRESHOLD_RANGE
+                self.error_mean += behavior_value.mean(axis=0) / THRESHOLD_RANGE 
+                self.error_mean += mutated_behavior_value.mean(axis=0) / THRESHOLD_RANGE 
+                self.error_std += behavior_value.std(axis=0) / THRESHOLD_RANGE
+                self.error_std += mutated_behavior_value.std(axis=0) / THRESHOLD_RANGE
+
+
+                # Decode program strings from byte matrix
+                generated_value_string = [
+                    "".join(map(
+                        (lambda p: p.decode("utf-8")), 
+                        program)) for program in generated_value.tolist()]
+                mutated_generated_value_string = [
+                    "".join(map(
+                        (lambda p: p.decode("utf-8")), 
+                        program)) for program in mutated_generated_value.tolist()]
+                self.generated_programs += generated_value_string + mutated_generated_value_string
 
 
                 # Print result for verification
@@ -957,11 +1150,6 @@ def test_epf_5(model_checkpoint):
                     "ACC: %.2f" % (self.syntax_accuracy * 100),
                     "ERR Mean: %.2f" % self.error_mean.mean(),
                     "ERR STD: %.2f" % self.error_std.mean())
-
-
-                # Record current precision recall
-                self.precision_points.append(precision)
-                self.recall_points.append(recall)
 
                 
                 # Calculate new decision threshold
@@ -1020,3 +1208,14 @@ def test_epf_5(model_checkpoint):
         datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
         "_behavior_error.png")
     plt.close()
+
+
+    # Write file containing generated programs
+    with open(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_generated_programs.txt", "w") as output_file:
+
+        # Write each program string to separate line
+        for line in data_saver.generated_programs:
+            output_file.write(line)
