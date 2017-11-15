@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 # The location on the disk of project
-PROJECT_BASEDIR = ("C:/Users/brand/Google Drive/Academic/Research/" +
+PROJECT_BASEDIR = ("G:/My Drive/Academic/Research/" + 
     "Program Synthesis with Deep Learning/")
 
 
@@ -188,7 +188,7 @@ def generate_batch(name, examples, program, length, batch_size=BATCH_SIZE, num_t
             batch_size=batch_size,
             num_threads=num_threads,
             capacity=TOTAL_EXAMPLES,
-            min_after_dequeue=TOTAL_EXAMPLES)
+            min_after_dequeue=EPOCH_SIZE)
 
 
     # Preserve order of batch
