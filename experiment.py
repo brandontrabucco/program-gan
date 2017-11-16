@@ -934,7 +934,6 @@ def train_epf_5(num_epochs=1):
         syntax_loss = tf.add_n(tf.get_collection(PREFIX_SYNTAX + COLLECTION_LOSSES))
         behavior_loss = tf.add_n(tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_LOSSES))
         generator_loss = tf.add_n(tf.get_collection(PREFIX_GENERATOR + COLLECTION_LOSSES))
-        total_loss = syntax_loss + behavior_loss + generator_loss
 
 
         # Calculate gradient for each set of parameters
@@ -950,7 +949,9 @@ def train_epf_5(num_epochs=1):
             # Session is initialized
             def begin(self):
                 self.start_time = time()
-                self.loss_points = []
+                self.syntax_loss_points = []
+                self.behavior_loss_points = []
+                self.generator_loss_points = []
                 self.iteration_points = []
 
 
@@ -958,14 +959,16 @@ def train_epf_5(num_epochs=1):
             def before_run(self, run_context):
                 return tf.train.SessionRunArgs([
                     tf.train.get_global_step(),
-                    total_loss])
+                    syntax_loss,
+                    behavior_loss,
+                    generator_loss])
 
 
             # Just after inference
             def after_run(self, run_context, run_values):
                 
                 # Obtain graph results
-                current_step, loss_value = run_values.results
+                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value = run_values.results
 
 
                 # Calculate weighted speed
@@ -985,11 +988,15 @@ def train_epf_5(num_epochs=1):
                         "REM: %d" % (num_steps - current_step),
                         "SPD: %.2f bat/sec" % batch_speed,
                         "ETA: %.2f hrs" % ((num_steps - current_step) / batch_speed / 60 / 60),
-                        "LOSS: %.2f" % loss_value)
+                        "SYN: %.2f" % syntax_loss_value,
+                        "BEH: %.2f" % behavior_loss_value,
+                        "GEN: %.2f" % generator_loss_value)
 
 
-                    # Record current loss
-                    self.loss_points.append(loss_value)
+                    # Record current loss from all networks
+                    self.syntax_loss_points.append(syntax_loss_value)
+                    self.behavior_loss_points.append(behavior_loss_value)
+                    self.generator_loss_points.append(generator_loss_value)
                     self.iteration_points.append(current_step)
 
 
@@ -1017,10 +1024,10 @@ def train_epf_5(num_epochs=1):
                 session.run(gradient_batch)
 
 
-    # Construct and save training loss plot
+    # Construct and save training loss for syntax network
     plt.plot(
         data_saver.iteration_points, 
-        data_saver.loss_points,
+        data_saver.syntax_loss_points,
         "b--o")
     plt.xlabel("Batch Iteration")
     plt.ylabel("Mean Huber Loss")
@@ -1028,7 +1035,37 @@ def train_epf_5(num_epochs=1):
     plt.savefig(
         PLOT_BASEDIR + 
         datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
-        "_training_loss.png")
+        "_syntax_training_loss.png")
+    plt.close()
+
+
+    # Construct and save training loss for behavior network
+    plt.plot(
+        data_saver.iteration_points, 
+        data_saver.behavior_loss_points,
+        "b--o")
+    plt.xlabel("Batch Iteration")
+    plt.ylabel("Mean Huber Loss")
+    plt.yscale("log")
+    plt.savefig(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_behavior_training_loss.png")
+    plt.close()
+
+
+    # Construct and save training loss for generator network
+    plt.plot(
+        data_saver.iteration_points, 
+        data_saver.generator_loss_points,
+        "b--o")
+    plt.xlabel("Batch Iteration")
+    plt.ylabel("Mean Huber Loss")
+    plt.yscale("log")
+    plt.savefig(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_generator_training_loss.png")
     plt.close()
 
 
