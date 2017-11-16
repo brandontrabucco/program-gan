@@ -900,7 +900,7 @@ def train_epf_5(num_epochs=1):
         syntax_gradient = train(syntax_loss, syntax_parameters)
         behavior_gradient = train(behavior_loss, behavior_parameters)
         generator_gradient = train(generator_loss, generator_parameters)
-        gradient_batch = tf.group(syntax_gradient, behavior_gradient)
+        gradient_batch = tf.group(syntax_gradient, behavior_gradient, generator_gradient)
 
 
         # Report testing progress
