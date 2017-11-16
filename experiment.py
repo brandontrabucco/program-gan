@@ -714,21 +714,34 @@ def reset_kernel():
     STEP_INCREMENTED = False
 
 
-# Compute loss for syntax discriminator
-def loss(prediction, labels, collection):
+# Compute loss for maximizing similarity
+def similarity_loss(prediction, labels, collection):
 
-    # Calculate huber loss of prediction
+    # Calculate sum huber loss of prediction
     huber_loss = tf.losses.huber_loss(labels, prediction)
 
-
-    # Calculate the mean loss across batch
+    
+    # Add loss to collection for organization
     tf.add_to_collection(collection, huber_loss)
 
     return huber_loss
 
 
+# Compute loss for maximizing dissimilarity with saddle
+def difference_loss(prediction, labels, collection):
+
+    # Calculate sum gaussian loss of prediction
+    gaussian_loss = tf.reduce_sum(tf.exp(tf.negative(tf.square(labels - prediction))))
+
+    
+    # Add loss to collection for organization
+    tf.add_to_collection(collection, gaussian_loss)
+
+    return gaussian_loss
+
+
 # Compute loss gradient and update parameters
-def train(loss, parameters):
+def minimize(loss, parameters):
     
     # Initialization flag for global step
     global STEP_INCREMENTED
@@ -799,7 +812,7 @@ def train_epf_5(num_epochs=1):
 
         # Compute syntax of original source code
         syntax_batch = inference_syntax(program_batch, length_batch)
-        syntax_loss = loss(
+        syntax_loss = similarity_loss(
             syntax_batch, 
             tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
             (PREFIX_SYNTAX + COLLECTION_LOSSES))
@@ -807,7 +820,7 @@ def train_epf_5(num_epochs=1):
 
         # Compute syntax of mutated source code
         mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
-        mutated_syntax_loss = loss(
+        mutated_syntax_loss = similarity_loss(
             mutated_syntax_batch, 
             tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
             (PREFIX_SYNTAX + COLLECTION_LOSSES))
@@ -829,7 +842,7 @@ def train_epf_5(num_epochs=1):
         # Compute behavior function of original code
         behavior_batch = inference_behavior(program_batch, length_batch)
         behavior_prediction = behavior_batch(input_examples_batch)
-        behavior_loss = loss(
+        behavior_loss = similarity_loss(
             behavior_prediction, 
             output_examples_batch,
             (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
@@ -838,7 +851,7 @@ def train_epf_5(num_epochs=1):
         # Compute behavior function of mutated code
         mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
         mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
-        mutated_behavior_loss = loss(
+        mutated_behavior_loss = similarity_loss(
             mutated_behavior_prediction, 
             output_examples_batch,
             (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
@@ -851,36 +864,64 @@ def train_epf_5(num_epochs=1):
 
         # Compute syntax classification of generated program
         syntax_generated_batch = inference_syntax(generated_batch, length_batch)
-        syntax_generated_loss = loss(
+        syntax_generated_loss = similarity_loss(
             syntax_generated_batch, 
             tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
             (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
+        # Detect incorrect syntax in generated code
+        _syntax_generated_loss = similarity_loss(
+            syntax_generated_batch, 
+            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_SYNTAX + COLLECTION_LOSSES))
+
+
         # Compute syntax classification of generated program from mutated input
         syntax_mutated_generated_batch = inference_syntax(mutated_generated_batch, length_batch)
-        syntax_mutated_generated_loss = loss(
+        syntax_mutated_generated_loss = similarity_loss(
             syntax_mutated_generated_batch, 
             tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
             (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
+        # Detect incorrect syntax in generated code
+        _syntax_mutated_generated_loss = similarity_loss(
+            syntax_mutated_generated_batch, 
+            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_SYNTAX + COLLECTION_LOSSES))
+
+
         # Compute the behavior of generated program
         behavior_generated_batch = inference_behavior(generated_batch, length_batch)
         behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
-        behavior_generated_loss = loss(
+        behavior_generated_loss = similarity_loss(
             behavior_generated_prediction, 
             behavior_prediction,
             (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
+        # Detect different behavior in generated code
+        _behavior_generated_loss = difference_loss(
+            behavior_generated_prediction, 
+            behavior_prediction,
+            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
+
+
         # Compute the behavior of generated program from mutated input
         behavior_mutated_generated_batch = inference_behavior(mutated_generated_batch, length_batch)
         behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
-        behavior_mutated_generated_loss = loss(
+        behavior_mutated_generated_loss = similarity_loss(
             behavior_mutated_generated_prediction, 
             mutated_behavior_prediction,
             (PREFIX_GENERATOR + COLLECTION_LOSSES))
+
+
+        # Detect different behavior in generated code
+        _behavior_mutated_generated_loss = difference_loss(
+            behavior_mutated_generated_prediction, 
+            mutated_behavior_prediction,
+            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
         # Obtain parameters for syntax and behavior discriminator networks
@@ -897,9 +938,9 @@ def train_epf_5(num_epochs=1):
 
 
         # Calculate gradient for each set of parameters
-        syntax_gradient = train(syntax_loss, syntax_parameters)
-        behavior_gradient = train(behavior_loss, behavior_parameters)
-        generator_gradient = train(generator_loss, generator_parameters)
+        syntax_gradient = minimize(syntax_loss, syntax_parameters)
+        behavior_gradient = minimize(behavior_loss, behavior_parameters)
+        generator_gradient = minimize(generator_loss, generator_parameters)
         gradient_batch = tf.group(syntax_gradient, behavior_gradient, generator_gradient)
 
 
