@@ -42,7 +42,7 @@ DATASET_DEFAULT = "0"
 DATASET_MAXIMUM = 64
 DATASET_VOCABULARY = sn.printable
 VOCAB_SIZE = len(DATASET_VOCABULARY)
-TOTAL_MUTATIONS = 10
+TOTAL_MUTATIONS = 3
 
 
 # Batch and logging configuration constants
@@ -77,11 +77,13 @@ ENSEMBLE_SIZE = 1
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
 USE_DROPOUT = True
+USE_MUTATIONS = False
+USE_ADVERSARY = False
 
 
 # Behavior function hyperparameters
 BEHAVIOR_WIDTH = 4
-BEHAVIOR_DEPTH= 1
+BEHAVIOR_DEPTH= 2
 BEHAVIOR_TOPOLOGY = ([[1, BEHAVIOR_WIDTH]] + 
     [[BEHAVIOR_WIDTH, BEHAVIOR_WIDTH] for i in range(BEHAVIOR_DEPTH)] + 
     [[BEHAVIOR_WIDTH, 1]])
@@ -351,8 +353,10 @@ def inference_syntax(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), parameters)
+        if not SYNTAX_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), p)
 
 
     # Second bidirectional lstm layer
@@ -392,8 +396,10 @@ def inference_syntax(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), parameters)
+        if not SYNTAX_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), p)
 
 
     # Third attentional dense layer
@@ -410,8 +416,10 @@ def inference_syntax(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), parameters)
+        if not SYNTAX_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_SYNTAX + COLLECTION_PARAMETERS), p)
 
     
     # LSTM has been computed at least once, return calculation node
@@ -463,8 +471,10 @@ def inference_behavior(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), parameters)
+        if not BEHAVIOR_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), p)
 
 
     # Second bidirectional lstm layer
@@ -504,8 +514,10 @@ def inference_behavior(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), parameters)
+        if not BEHAVIOR_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), p)
 
 
     # Third attentional dense layer
@@ -548,8 +560,10 @@ def inference_behavior(program_batch, length_batch):
 
 
             # Add parameters to collection for training
-            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-            tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), parameters)
+            if not BEHAVIOR_INITIALIZED:
+                parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+                for p in parameters:
+                    tf.add_to_collection((PREFIX_BEHAVIOR + COLLECTION_PARAMETERS), p)
 
 
     # Compute expected output given input example
@@ -629,8 +643,10 @@ def inference_generator(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), parameters)
+        if not GENERATOR_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), p)
 
 
     # Second bidirectional lstm layer
@@ -670,8 +686,10 @@ def inference_generator(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), parameters)
+        if not GENERATOR_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), p)
 
 
     # Third attentional dense layer
@@ -688,8 +706,10 @@ def inference_generator(program_batch, length_batch):
 
 
         # Add parameters to collection for training
-        parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
-        tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), parameters)
+        if not GENERATOR_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_GENERATOR + COLLECTION_PARAMETERS), p)
 
     
     # LSTM has been computed at least once, return calculation node
@@ -708,9 +728,9 @@ def reset_kernel():
 
 
     # Assign states to initial empty
-    SYNTAX_INITIALIZED = None
-    BEHAVIOR_INITIALIZED = None
-    GENERATOR_INITIALIZED = None
+    SYNTAX_INITIALIZED = False
+    BEHAVIOR_INITIALIZED = False
+    GENERATOR_INITIALIZED = False
     STEP_INCREMENTED = False
 
 
@@ -789,7 +809,7 @@ def minimize(loss, parameters):
 
 
 # Run single training cycle on dataset
-def train_epf_5(num_epochs=1):
+def train_epf_5(num_epochs=1, model_checkpoint=None):
 
     # Reset lstm kernel
     reset_kernel()
@@ -802,12 +822,17 @@ def train_epf_5(num_epochs=1):
     # Create new graph
     with tf.Graph().as_default():
 
-        # Compute single training batch
+        # Compute single training batch, and generate new program
         name_batch, examples_batch, program_batch, length_batch = get_training_batch()
+        generated_batch = inference_generator(program_batch, length_batch)
+        generated_string = detokenize_program(generated_batch)
 
 
-        # Obtain character mutations of programs
-        mutated_batch = mutate_program_batch(program_batch)
+        # Obtain character mutations of programs, and generate corrected program
+        if USE_MUTATIONS:
+            mutated_batch = mutate_program_batch(program_batch)
+            mutated_generated_batch = inference_generator(mutated_batch, length_batch)
+            mutated_generated_string = detokenize_program(generated_batch)
 
 
         # Compute syntax of original source code
@@ -819,11 +844,12 @@ def train_epf_5(num_epochs=1):
 
 
         # Compute syntax of mutated source code
-        mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
-        mutated_syntax_loss = similarity_loss(
-            mutated_syntax_batch, 
-            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
-            (PREFIX_SYNTAX + COLLECTION_LOSSES))
+        if USE_MUTATIONS:
+            mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
+            mutated_syntax_loss = similarity_loss(
+                mutated_syntax_batch, 
+                tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+                (PREFIX_SYNTAX + COLLECTION_LOSSES))
 
 
         # Slice examples into input output
@@ -849,79 +875,90 @@ def train_epf_5(num_epochs=1):
 
 
         # Compute behavior function of mutated code
-        mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
-        mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
-        mutated_behavior_loss = similarity_loss(
-            mutated_behavior_prediction, 
-            output_examples_batch,
-            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
-
-
-        # Calculate the corrected code with generator
-        generated_batch = inference_generator(program_batch, length_batch)
-        mutated_generated_batch = inference_generator(mutated_batch, length_batch)
+        if USE_MUTATIONS:
+            mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
+            mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
+            mutated_behavior_loss = similarity_loss(
+                mutated_behavior_prediction, 
+                output_examples_batch,
+                (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
         # Compute syntax classification of generated program
-        syntax_generated_batch = inference_syntax(generated_batch, length_batch)
-        syntax_generated_loss = similarity_loss(
-            syntax_generated_batch, 
-            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
-            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+        if USE_ADVERSARY:
+            syntax_generated_batch = inference_syntax(generated_batch, length_batch)
+            syntax_generated_loss = similarity_loss(
+                syntax_generated_batch, 
+                tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
+                (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
         # Detect incorrect syntax in generated code
-        _syntax_generated_loss = similarity_loss(
-            syntax_generated_batch, 
-            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
-            (PREFIX_SYNTAX + COLLECTION_LOSSES))
+        if USE_ADVERSARY:
+            _syntax_generated_loss = similarity_loss(
+                syntax_generated_batch, 
+                tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+                (PREFIX_SYNTAX + COLLECTION_LOSSES))
 
 
         # Compute syntax classification of generated program from mutated input
-        syntax_mutated_generated_batch = inference_syntax(mutated_generated_batch, length_batch)
-        syntax_mutated_generated_loss = similarity_loss(
-            syntax_mutated_generated_batch, 
-            tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
-            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+        if USE_MUTATIONS and USE_ADVERSARY:
+            syntax_mutated_generated_batch = inference_syntax(mutated_generated_batch, length_batch)
+            syntax_mutated_generated_loss = similarity_loss(
+                syntax_mutated_generated_batch, 
+                tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
+                (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
         # Detect incorrect syntax in generated code
-        _syntax_mutated_generated_loss = similarity_loss(
-            syntax_mutated_generated_batch, 
-            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
-            (PREFIX_SYNTAX + COLLECTION_LOSSES))
+        if USE_MUTATIONS and USE_ADVERSARY:
+            _syntax_mutated_generated_loss = similarity_loss(
+                syntax_mutated_generated_batch, 
+                tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+                (PREFIX_SYNTAX + COLLECTION_LOSSES))
 
 
         # Compute the behavior of generated program
-        behavior_generated_batch = inference_behavior(generated_batch, length_batch)
-        behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
-        behavior_generated_loss = similarity_loss(
-            behavior_generated_prediction, 
-            behavior_prediction,
-            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+        if USE_ADVERSARY:
+            behavior_generated_batch = inference_behavior(generated_batch, length_batch)
+            behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
+            behavior_generated_loss = similarity_loss(
+                behavior_generated_prediction, 
+                behavior_prediction,
+                (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
         # Detect different behavior in generated code
-        _behavior_generated_loss = difference_loss(
-            behavior_generated_prediction, 
-            behavior_prediction,
-            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
+        if USE_ADVERSARY:
+            _behavior_generated_loss = difference_loss(
+                behavior_generated_prediction, 
+                behavior_prediction,
+                (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
         # Compute the behavior of generated program from mutated input
-        behavior_mutated_generated_batch = inference_behavior(mutated_generated_batch, length_batch)
-        behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
-        behavior_mutated_generated_loss = similarity_loss(
-            behavior_mutated_generated_prediction, 
-            mutated_behavior_prediction,
-            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+        if USE_MUTATIONS and USE_ADVERSARY:
+            behavior_mutated_generated_batch = inference_behavior(mutated_generated_batch, length_batch)
+            behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
+            behavior_mutated_generated_loss = similarity_loss(
+                behavior_mutated_generated_prediction, 
+                mutated_behavior_prediction,
+                (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
         # Detect different behavior in generated code
-        _behavior_mutated_generated_loss = difference_loss(
-            behavior_mutated_generated_prediction, 
-            mutated_behavior_prediction,
-            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
+        if USE_MUTATIONS and USE_ADVERSARY:
+            _behavior_mutated_generated_loss = difference_loss(
+                behavior_mutated_generated_prediction, 
+                mutated_behavior_prediction,
+                (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
+
+
+        # Train generator to copy output from input for transfer learning
+        identity_generated_loss = similarity_loss(
+                generated_batch, 
+                program_batch,
+                (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
 
         # Obtain parameters for syntax and behavior discriminator networks
@@ -961,14 +998,15 @@ def train_epf_5(num_epochs=1):
                     tf.train.get_global_step(),
                     syntax_loss,
                     behavior_loss,
-                    generator_loss])
+                    generator_loss,
+                    generated_string])
 
 
             # Just after inference
             def after_run(self, run_context, run_values):
                 
                 # Obtain graph results
-                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value = run_values.results
+                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value, generated_string_value = run_values.results
 
 
                 # Calculate weighted speed
@@ -980,8 +1018,14 @@ def train_epf_5(num_epochs=1):
                 # Update every period of steps
                 if current_step % max(num_steps // TOTAL_LOGS, 1) == 0:
 
+                    # Read the current generated program string
+                    generated_string_value = [
+                        "".join(map(
+                            (lambda p: p.decode("utf-8")), 
+                            program)) for program in generated_string_value.tolist()]
 
-                    # Display date, batch speed, estimated time, loss, and accuracy
+
+                    # Display date, batch speed, estimated time, loss, and generated program
                     print(
                         datetime.now(),
                         "CUR: %d" % current_step,
@@ -991,6 +1035,8 @@ def train_epf_5(num_epochs=1):
                         "SYN: %.2f" % syntax_loss_value,
                         "BEH: %.2f" % behavior_loss_value,
                         "GEN: %.2f" % generator_loss_value)
+                    print(generated_string_value[0])
+                    print()
 
 
                     # Record current loss from all networks
@@ -1000,8 +1046,9 @@ def train_epf_5(num_epochs=1):
                     self.iteration_points.append(current_step)
 
 
-        # Prepare to save and load models
-        model_saver = tf.train.Saver()
+        # Prepare to save and load models, using existing trainable parameters
+        model_saver = tf.train.Saver(
+            var_list=(syntax_parameters + behavior_parameters + generator_parameters))
 
 
         # Track datapoints as testing progresses
@@ -1016,6 +1063,11 @@ def train_epf_5(num_epochs=1):
                 save_steps=EPOCH_SIZE,
                 saver=model_saver),
             data_saver]) as session:
+
+            # Load model if specified
+            if model_checkpoint is not None:
+                model_saver.restore(session, model_checkpoint)
+
 
             # Repeat training iteratively
             while not session.should_stop():
@@ -1079,17 +1131,19 @@ def test_epf_5(model_checkpoint):
     # Create new graph
     with tf.Graph().as_default():
 
-        # Compute single training batch
+        # Compute single training batch, and generate new program
         name_batch, examples_batch, program_batch, length_batch = get_training_batch()
+        generated_batch = inference_generator(program_batch, length_batch)
 
 
-        # Obtain character mutations of programs
+        # Obtain character mutations of programs, and generate corrected program
         mutated_batch = mutate_program_batch(program_batch)
+        mutated_generated_batch = inference_generator(mutated_batch, length_batch)
 
 
         # Compute syntax of corrected code
         syntax_batch = inference_syntax(program_batch, length_batch)
-        mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
+        mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)    
 
 
         # Slice examples into input output
@@ -1127,7 +1181,13 @@ def test_epf_5(model_checkpoint):
         mutated_generated_string = detokenize_program(mutated_generated_batch)
 
 
-        # Group the previous operations
+        # Obtain all trainable paraneters to be loaded into current graph
+        syntax_parameters = tf.get_collection(PREFIX_SYNTAX + COLLECTION_PARAMETERS)
+        behavior_parameters = tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_PARAMETERS)
+        generator_parameters = tf.get_collection(PREFIX_GENERATOR + COLLECTION_PARAMETERS)
+
+
+        # Group previous operations into single node
         group_batch = tf.group(
             syntax_batch, 
             mutated_syntax_batch,
@@ -1219,7 +1279,7 @@ def test_epf_5(model_checkpoint):
                 self.generated_programs += generated_value_string + mutated_generated_value_string
 
 
-                # Print result for verification
+                # Display date, accuracy, and loss
                 print(
                     datetime.now(),
                     "THD: %.2f" % SYNTAX_THRESHOLD,
@@ -1234,8 +1294,9 @@ def test_epf_5(model_checkpoint):
                 SYNTAX_THRESHOLD += THRESHOLD_DELTA
 
 
-        # Prepare to save and load models
-        model_saver = tf.train.Saver()
+        # Prepare to save and load models, using existing trainable parameters
+        model_saver = tf.train.Saver(
+            var_list=(syntax_parameters + behavior_parameters + generator_parameters))
 
 
         # Track datapoints as testing progresses
