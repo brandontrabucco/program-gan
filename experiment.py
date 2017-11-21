@@ -57,6 +57,7 @@ PREFIX_TOTAL = "total"
 PREFIX_GENERATOR = "generator"
 PREFIX_SYNTAX = "syntax"
 PREFIX_BEHAVIOR = "behavior"
+PREFIX_ENCODER = "encoder"
 
 
 # Extension nomenclature
@@ -64,6 +65,8 @@ EXTENSION_NUMBER = (lambda number: "_" + str(number))
 EXTENSION_LOSS = "_loss"
 EXTENSION_WEIGHTS = "_weights"
 EXTENSION_BIASES = "_biases"
+EXTENSION_MEAN = "_mean"
+EXTENSION_VARIANCE = "_variance"
 
 
 # Collection nomenclature
@@ -76,9 +79,9 @@ COLLECTION_ACTIVATIONS = "_activations"
 ENSEMBLE_SIZE = 1
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
-USE_DROPOUT = True
-USE_MUTATIONS = False
-USE_ADVERSARY = False
+USE_DROPOUT = False
+USE_MUTATIONS = True
+USE_ADVERSARY = True
 
 
 # Behavior function hyperparameters
@@ -93,6 +96,7 @@ BEHAVIOR_TOPOLOGY = ([[1, BEHAVIOR_WIDTH]] +
 INITIAL_LEARNING_RATE = 0.001
 DECAY_STEPS = EPOCH_SIZE
 DECAY_FACTOR = 0.5
+KLD_REGULARIZATION = 0.001
 
 
 # Precision recall threshold parameters
@@ -428,7 +432,7 @@ def inference_syntax(program_batch, length_batch):
 
 
 # Compute behavior function with brnn
-def inference_behavior(program_batch, length_batch):
+def inference_behavior(encoded_batch, length_batch):
 
     # Initialization flag for lstm
     global BEHAVIOR_INITIALIZED
@@ -463,7 +467,7 @@ def inference_behavior(program_batch, length_batch):
         output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
             lstm_forward,
             lstm_backward,
-            program_batch,
+            encoded_batch,
             initial_state_fw=initial_state_fw,
             initial_state_bw=initial_state_bw,
             sequence_length=length_batch,
@@ -569,7 +573,7 @@ def inference_behavior(program_batch, length_batch):
     # Compute expected output given input example
     def behavior_function(input_examples):
 
-        # Add additional dimension end of input [64, 10, 1]
+        # Add additional dimension end of input
         activation = tf.expand_dims(input_examples, -1)
 
 
@@ -600,7 +604,7 @@ def inference_behavior(program_batch, length_batch):
 
 
 # Compute generated program with brnn
-def inference_generator(program_batch, length_batch):
+def inference_generator(encoded_batch, length_batch):
 
     # Initialization flag for lstm
     global GENERATOR_INITIALIZED
@@ -635,7 +639,7 @@ def inference_generator(program_batch, length_batch):
         output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
             lstm_forward,
             lstm_backward,
-            program_batch,
+            encoded_batch,
             initial_state_fw=initial_state_fw,
             initial_state_bw=initial_state_bw,
             sequence_length=length_batch,
@@ -695,7 +699,7 @@ def inference_generator(program_batch, length_batch):
     # Third attentional dense layer
     with tf.variable_scope((PREFIX_GENERATOR + EXTENSION_NUMBER(3)), reuse=GENERATOR_INITIALIZED) as scope:
 
-        # Take linear combination of hidden states and produce syntax label
+        # Take linear combination of hidden states and produce generated character sequence
         linear_w = initialize_weights_cpu(
             (scope.name + EXTENSION_WEIGHTS), 
             [DATASET_MAXIMUM, LSTM_SIZE*2, DATASET_MAXIMUM, VOCAB_SIZE])
@@ -717,6 +721,134 @@ def inference_generator(program_batch, length_batch):
     return tf.reshape(output_batch, [BATCH_SIZE, DATASET_MAXIMUM, VOCAB_SIZE])
 
 
+# Compute generated program with brnn
+def inference_encoder(program_batch, length_batch):
+
+    # Initialization flag for lstm
+    global ENCODER_INITIALIZED
+
+
+    # First bidirectional lstm layer
+    with tf.variable_scope((PREFIX_ENCODER + EXTENSION_NUMBER(1)), reuse=ENCODER_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=1.0, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=1.0, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            program_batch,
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+        # Add parameters to collection for training
+        if not ENCODER_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_ENCODER + COLLECTION_PARAMETERS), p)
+
+
+    # Second bidirectional lstm layer
+    with tf.variable_scope((PREFIX_ENCODER + EXTENSION_NUMBER(2)), reuse=ENCODER_INITIALIZED) as scope:
+
+        # Define forward and backward rnn layers
+        lstm_forward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+        lstm_backward = tf.contrib.rnn.LSTMCell(LSTM_SIZE)
+
+
+        # Initial state for lstm cell
+        initial_state_fw = lstm_forward.zero_state(BATCH_SIZE, tf.float32)
+        initial_state_bw = lstm_backward.zero_state(BATCH_SIZE, tf.float32)
+
+
+        # Compute dropout probabilities
+        if USE_DROPOUT:
+            lstm_forward = tf.contrib.rnn.DropoutWrapper(
+                lstm_forward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+            lstm_backward = tf.contrib.rnn.DropoutWrapper(
+                lstm_backward, 
+                input_keep_prob=DROPOUT_PROBABILITY, 
+                output_keep_prob=DROPOUT_PROBABILITY)
+
+
+        # Compute rnn activations
+        output_batch, state_batch = tf.nn.bidirectional_dynamic_rnn(
+            lstm_forward,
+            lstm_backward,
+            tf.concat(output_batch, 2),
+            initial_state_fw=initial_state_fw,
+            initial_state_bw=initial_state_bw,
+            sequence_length=length_batch,
+            dtype=tf.float32)
+
+
+        # Add parameters to collection for training
+        if not ENCODER_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_ENCODER + COLLECTION_PARAMETERS), p)
+
+
+    # Third attentional dense layer
+    with tf.variable_scope((PREFIX_ENCODER + EXTENSION_NUMBER(3)), reuse=ENCODER_INITIALIZED) as scope:
+
+        # Take linear combination of hidden states and produce mean
+        linear_w_mean = initialize_weights_cpu(
+            (scope.name + EXTENSION_MEAN + EXTENSION_WEIGHTS), 
+            [DATASET_MAXIMUM, LSTM_SIZE*2])
+        linear_b_mean = initialize_biases_cpu(
+            (scope.name + EXTENSION_MEAN + EXTENSION_BIASES), 
+            [1])
+        mean_batch = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_mean, 2), linear_b_mean)
+
+
+        # Take linear combination of hidden states and produce variance
+        linear_w_variance = initialize_weights_cpu(
+            (scope.name + EXTENSION_VARIANCE + EXTENSION_WEIGHTS), 
+            [DATASET_MAXIMUM, LSTM_SIZE*2])
+        linear_b_variance = initialize_biases_cpu(
+            (scope.name + EXTENSION_VARIANCE + EXTENSION_BIASES), 
+            [1])
+        variance_batch = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w_variance, 2), linear_b_variance)
+
+
+        # Add parameters to collection for training
+        if not ENCODER_INITIALIZED:
+            parameters = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES , scope=scope.name)
+            for p in parameters:
+                tf.add_to_collection((PREFIX_ENCODER + COLLECTION_PARAMETERS), p)
+
+    
+    # LSTM has been computed at least once, return calculation node
+    ENCODER_INITIALIZED = True
+    return tf.reshape(mean_batch, [BATCH_SIZE, 1, 1]), tf.reshape(variance_batch, [BATCH_SIZE, 1, 1])
+
+
 # Utility function reset initialization flags
 def reset_kernel():
 
@@ -724,6 +856,7 @@ def reset_kernel():
     global SYNTAX_INITIALIZED
     global BEHAVIOR_INITIALIZED
     global GENERATOR_INITIALIZED
+    global ENCODER_INITIALIZED
     global STEP_INCREMENTED
 
 
@@ -731,6 +864,7 @@ def reset_kernel():
     SYNTAX_INITIALIZED = False
     BEHAVIOR_INITIALIZED = False
     GENERATOR_INITIALIZED = False
+    ENCODER_INITIALIZED = False
     STEP_INCREMENTED = False
 
 
@@ -758,6 +892,26 @@ def difference_loss(prediction, labels, collection):
     tf.add_to_collection(collection, gaussian_loss)
 
     return gaussian_loss
+
+
+# Compute regularization loss due to KL divergence from initial prior
+def kld_loss(mean, variance, collection):
+
+    # Compute actual KL divrgence of latent distribution from normal
+    divergence_loss = KLD_REGULARIZATION * tf.contrib.distributions.kl_divergence(
+        tf.distributions.Normal(
+            tf.squeeze(mean), 
+            tf.squeeze(variance)),
+        tf.distributions.Normal(
+            tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
+            tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32))
+
+
+    # Add loss to collection for organization
+    tf.add_to_collection(collection, divergence_loss)
+
+    return divergence_loss
+
 
 
 # Compute loss gradient and update parameters
@@ -822,17 +976,53 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
     # Create new graph
     with tf.Graph().as_default():
 
-        # Compute single training batch, and generate new program
+        # Compute single training batch, and encode behavior distribution
         name_batch, examples_batch, program_batch, length_batch = get_training_batch()
-        generated_batch = inference_generator(program_batch, length_batch)
+        mean_batch, variance_batch = inference_encoder(program_batch, length_batch)
+        latent_batch = tf.distributions.Normal(
+            tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
+            tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32)
+        encoded_batch = tf.transpose(latent_batch.sample([
+            VOCAB_SIZE,
+            DATASET_MAXIMUM])) * variance_batch + mean_batch
+
+
+        # Generate new program, and encode behavior distribution
+        generated_batch = inference_generator(encoded_batch, length_batch)
+        generated_mean_batch, generated_variance_batch = inference_encoder(generated_batch, length_batch)
+        generated_latent_batch = tf.distributions.Normal(
+            tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
+            tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32)
+        generated_encoded_batch = tf.transpose(generated_latent_batch.sample([
+            VOCAB_SIZE,
+            DATASET_MAXIMUM])) * generated_variance_batch + generated_mean_batch
         generated_string = detokenize_program(generated_batch)
 
 
-        # Obtain character mutations of programs, and generate corrected program
+        # Should we compute character mutations of program batch
         if USE_MUTATIONS:
+
+            # Compute random character mutations, and encode behavior distribution
             mutated_batch = mutate_program_batch(program_batch)
-            mutated_generated_batch = inference_generator(mutated_batch, length_batch)
-            mutated_generated_string = detokenize_program(generated_batch)
+            mutated_mean_batch, mutated_variance_batch = inference_encoder(mutated_batch, length_batch)
+            mutated_latent_batch = tf.distributions.Normal(
+            tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
+            tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32)
+            mutated_encoded_batch = tf.transpose(mutated_latent_batch.sample([
+                VOCAB_SIZE,
+                DATASET_MAXIMUM])) * mutated_variance_batch + mutated_mean_batch
+
+
+            # Generate corrected program, and encode behavior distribution
+            mutated_generated_batch = inference_generator(mutated_encoded_batch, length_batch)
+            mutated_generated_mean_batch, mutated_generated_variance_batch = inference_encoder(mutated_generated_batch, length_batch)
+            mutated_generated_latent_batch = tf.distributions.Normal(
+            tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
+            tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32)
+            mutated_generated_encoded_batch = tf.transpose(mutated_generated_latent_batch.sample([
+                VOCAB_SIZE,
+                DATASET_MAXIMUM])) * mutated_generated_variance_batch + mutated_generated_mean_batch
+            mutated_generated_string = detokenize_program(mutated_generated_batch)
 
 
         # Compute syntax of original source code
@@ -866,7 +1056,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Compute behavior function of original code
-        behavior_batch = inference_behavior(program_batch, length_batch)
+        behavior_batch = inference_behavior(encoded_batch, length_batch)
         behavior_prediction = behavior_batch(input_examples_batch)
         behavior_loss = similarity_loss(
             behavior_prediction, 
@@ -876,7 +1066,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Compute behavior function of mutated code
         if USE_MUTATIONS:
-            mutated_behavior_batch = inference_behavior(mutated_batch, length_batch)
+            mutated_behavior_batch = inference_behavior(mutated_encoded_batch, length_batch)
             mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
             mutated_behavior_loss = similarity_loss(
                 mutated_behavior_prediction, 
@@ -895,7 +1085,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Detect incorrect syntax in generated code
         if USE_ADVERSARY:
-            _syntax_generated_loss = similarity_loss(
+            adversary_syntax_generated_loss = similarity_loss(
                 syntax_generated_batch, 
                 tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
                 (PREFIX_SYNTAX + COLLECTION_LOSSES))
@@ -912,7 +1102,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Detect incorrect syntax in generated code
         if USE_MUTATIONS and USE_ADVERSARY:
-            _syntax_mutated_generated_loss = similarity_loss(
+            adversary_syntax_mutated_generated_loss = similarity_loss(
                 syntax_mutated_generated_batch, 
                 tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
                 (PREFIX_SYNTAX + COLLECTION_LOSSES))
@@ -920,7 +1110,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Compute the behavior of generated program
         if USE_ADVERSARY:
-            behavior_generated_batch = inference_behavior(generated_batch, length_batch)
+            behavior_generated_batch = inference_behavior(generated_encoded_batch, length_batch)
             behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
             behavior_generated_loss = similarity_loss(
                 behavior_generated_prediction, 
@@ -930,7 +1120,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Detect different behavior in generated code
         if USE_ADVERSARY:
-            _behavior_generated_loss = difference_loss(
+            adversary_behavior_generated_loss = difference_loss(
                 behavior_generated_prediction, 
                 behavior_prediction,
                 (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
@@ -938,7 +1128,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Compute the behavior of generated program from mutated input
         if USE_MUTATIONS and USE_ADVERSARY:
-            behavior_mutated_generated_batch = inference_behavior(mutated_generated_batch, length_batch)
+            behavior_mutated_generated_batch = inference_behavior(mutated_generated_encoded_batch, length_batch)
             behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
             behavior_mutated_generated_loss = similarity_loss(
                 behavior_mutated_generated_prediction, 
@@ -948,36 +1138,67 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Detect different behavior in generated code
         if USE_MUTATIONS and USE_ADVERSARY:
-            _behavior_mutated_generated_loss = difference_loss(
+            adversary_behavior_mutated_generated_loss = difference_loss(
                 behavior_mutated_generated_prediction, 
                 mutated_behavior_prediction,
                 (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
-        # Train generator to copy output from input for transfer learning
+        # Additionally train generator as variational autoencoder to reconstruct input 
         identity_generated_loss = similarity_loss(
-                generated_batch, 
+            generated_batch, 
+            program_batch,
+            (PREFIX_GENERATOR + COLLECTION_LOSSES))
+        if USE_MUTATIONS:
+            identity_mutated_generated_loss = similarity_loss(
+                mutated_generated_batch, 
                 program_batch,
                 (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
+        
+        # Enfore the latent representation of encoder is probability distribution
+        latent_loss = kld_loss(
+            mean_batch, 
+            variance_batch, 
+            (PREFIX_ENCODER + COLLECTION_LOSSES))
+        generated_latent_loss = kld_loss(
+            generated_mean_batch, 
+            generated_variance_batch, 
+            (PREFIX_ENCODER + COLLECTION_LOSSES))
 
-        # Obtain parameters for syntax and behavior discriminator networks
+
+        # Compute divergence loss for mutated programs
+        if USE_MUTATIONS:
+            mutated_latent_loss = kld_loss(
+                mutated_mean_batch, 
+                mutated_variance_batch, 
+                (PREFIX_ENCODER + COLLECTION_LOSSES))
+            mutated_generated_latent_loss = kld_loss(
+                mutated_generated_mean_batch, 
+                mutated_generated_variance_batch, 
+                (PREFIX_ENCODER + COLLECTION_LOSSES))
+
+
+        # Obtain parameters for each network to be optimized
         syntax_parameters = tf.get_collection(PREFIX_SYNTAX + COLLECTION_PARAMETERS)
         behavior_parameters = tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_PARAMETERS)
         generator_parameters = tf.get_collection(PREFIX_GENERATOR + COLLECTION_PARAMETERS)
+        encoder_parameters = tf.get_collection(PREFIX_ENCODER + COLLECTION_PARAMETERS)
 
 
         # Obtain loss for which to minimize with respect to parameters
         syntax_loss = tf.add_n(tf.get_collection(PREFIX_SYNTAX + COLLECTION_LOSSES))
         behavior_loss = tf.add_n(tf.get_collection(PREFIX_BEHAVIOR + COLLECTION_LOSSES))
         generator_loss = tf.add_n(tf.get_collection(PREFIX_GENERATOR + COLLECTION_LOSSES))
+        encoder_loss = tf.add_n(tf.get_collection(PREFIX_ENCODER + COLLECTION_LOSSES))
 
 
         # Calculate gradient for each set of parameters
         syntax_gradient = minimize(syntax_loss, syntax_parameters)
-        behavior_gradient = minimize(behavior_loss, behavior_parameters)
-        generator_gradient = minimize(generator_loss, generator_parameters)
-        gradient_batch = tf.group(syntax_gradient, behavior_gradient, generator_gradient)
+        behavior_gradient = minimize(behavior_loss, behavior_parameters + encoder_parameters)
+        generator_gradient = minimize(generator_loss, generator_parameters + encoder_parameters)
+        encoder_gradient = minimize(encoder_loss, encoder_parameters)
+        gradient_batch = tf.group(syntax_gradient, behavior_gradient, generator_gradient, encoder_gradient)
 
 
         # Report testing progress
