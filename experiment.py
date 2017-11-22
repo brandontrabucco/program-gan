@@ -1281,7 +1281,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=1),
+            tf.train.StopAtStepHook(num_steps=num_steps),
             tf.train.CheckpointSaverHook(
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
@@ -1556,7 +1556,7 @@ def test_epf_5(model_checkpoint):
 
 
             # Repeat testing iteratively for varying decision thresholds
-            for i in range(1):
+            for i in range(EPOCH_SIZE):
 
                 # Run single batch of testing
                 session.run(group_batch)
