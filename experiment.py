@@ -102,8 +102,7 @@ KLD_REGULARIZATION = 0.001
 # Precision recall threshold parameters
 THRESHOLD_UPPER = 1.0
 THRESHOLD_LOWER = 0.0
-THRESHOLD_RANGE = 100
-THRESHOLD_DELTA = (THRESHOLD_UPPER - THRESHOLD_LOWER) / THRESHOLD_RANGE
+THRESHOLD_DELTA = (THRESHOLD_UPPER - THRESHOLD_LOWER) / EPOCH_SIZE
 DENSITY_FUNCTION = (lambda x: (6 / (THRESHOLD_UPPER - THRESHOLD_LOWER)**3) * (x - THRESHOLD_LOWER) * (THRESHOLD_UPPER - x))
 SAMPLE_WEIGHT = (lambda x: DENSITY_FUNCTION(x) * THRESHOLD_DELTA)
 
@@ -1210,6 +1209,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                 self.syntax_loss_points = []
                 self.behavior_loss_points = []
                 self.generator_loss_points = []
+                self.encoder_loss_points = []
                 self.iteration_points = []
 
 
@@ -1220,14 +1220,16 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                     syntax_loss,
                     behavior_loss,
                     generator_loss,
-                    generated_string])
+                    encoder_loss,
+                    generated_string,
+                    length_batch])
 
 
             # Just after inference
             def after_run(self, run_context, run_values):
                 
                 # Obtain graph results
-                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value, generated_string_value = run_values.results
+                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value, encoder_loss_value, generated_string_value, length_value = run_values.results
 
 
                 # Calculate weighted speed
@@ -1243,7 +1245,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                     generated_string_value = [
                         "".join(map(
                             (lambda p: p.decode("utf-8")), 
-                            program)) for program in generated_string_value.tolist()]
+                            generated_string_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
 
 
                     # Display date, batch speed, estimated time, loss, and generated program
@@ -1264,6 +1266,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                     self.syntax_loss_points.append(syntax_loss_value)
                     self.behavior_loss_points.append(behavior_loss_value)
                     self.generator_loss_points.append(generator_loss_value)
+                    self.encoder_loss_points.append(encoder_loss_value)
                     self.iteration_points.append(current_step)
 
 
@@ -1278,7 +1281,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
         # Perform computation cycle based on graph
         with tf.train.MonitoredTrainingSession(hooks=[
-            tf.train.StopAtStepHook(num_steps=num_steps),
+            tf.train.StopAtStepHook(num_steps=1),
             tf.train.CheckpointSaverHook(
                 CHECKPOINT_BASEDIR,
                 save_steps=EPOCH_SIZE,
@@ -1302,8 +1305,9 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
         data_saver.iteration_points, 
         data_saver.syntax_loss_points,
         "b--o")
+    plt.title("Syntax Discriminator Loss")
     plt.xlabel("Batch Iteration")
-    plt.ylabel("Mean Huber Loss")
+    plt.ylabel("Total Loss")
     plt.yscale("log")
     plt.savefig(
         PLOT_BASEDIR + 
@@ -1317,8 +1321,9 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
         data_saver.iteration_points, 
         data_saver.behavior_loss_points,
         "b--o")
+    plt.title("Behavior Discriminator Loss")
     plt.xlabel("Batch Iteration")
-    plt.ylabel("Mean Huber Loss")
+    plt.ylabel("Total Loss")
     plt.yscale("log")
     plt.savefig(
         PLOT_BASEDIR + 
@@ -1332,13 +1337,30 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
         data_saver.iteration_points, 
         data_saver.generator_loss_points,
         "b--o")
+    plt.title("Generator Loss")
     plt.xlabel("Batch Iteration")
-    plt.ylabel("Mean Huber Loss")
+    plt.ylabel("Total Loss")
     plt.yscale("log")
     plt.savefig(
         PLOT_BASEDIR + 
         datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
         "_generator_training_loss.png")
+    plt.close()
+
+
+    # Construct and save training loss for encoder network
+    plt.plot(
+        data_saver.iteration_points, 
+        data_saver.encoder_loss_points,
+        "b--o")
+    plt.title("Encoder Loss")
+    plt.xlabel("Batch Iteration")
+    plt.ylabel("Total Loss")
+    plt.yscale("log")
+    plt.savefig(
+        PLOT_BASEDIR + 
+        datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
+        "_encoder_training_loss.png")
     plt.close()
 
 
@@ -1429,8 +1451,8 @@ def test_epf_5(model_checkpoint):
             # Session is initialized
             def begin(self):
                 self.syntax_accuracy = 0.0
-                self.error_mean = np.zeros((DATASET_IO_EXAMPLES))
-                self.error_std = np.zeros((DATASET_IO_EXAMPLES))
+                self.error_mean = []
+                self.error_std = []
                 self.precision_points = []
                 self.recall_points = []
                 self.generated_programs = []
@@ -1444,7 +1466,8 @@ def test_epf_5(model_checkpoint):
                     behavior_error,
                     mutated_behavior_error,
                     generated_string,
-                    mutated_generated_string])
+                    mutated_generated_string,
+                    length_batch])
 
 
             # Just after inference
@@ -1455,7 +1478,7 @@ def test_epf_5(model_checkpoint):
 
 
                 # Obtain graph results
-                syntax_value, mutated_syntax_value, behavior_value, mutated_behavior_value, generated_value, mutated_generated_value = run_values.results
+                syntax_value, mutated_syntax_value, behavior_value, mutated_behavior_value, generated_value, mutated_generated_value, length_value = run_values.results
 
 
                 # Calculations for precision and recall
@@ -1482,21 +1505,21 @@ def test_epf_5(model_checkpoint):
 
 
                 # Calculate mean and standard deviation of behavior error
-                self.error_mean += behavior_value.mean(axis=0) / THRESHOLD_RANGE 
-                self.error_mean += mutated_behavior_value.mean(axis=0) / THRESHOLD_RANGE 
-                self.error_std += behavior_value.std(axis=0) / THRESHOLD_RANGE
-                self.error_std += mutated_behavior_value.std(axis=0) / THRESHOLD_RANGE
+                self.error_mean += [behavior_value]
+                self.error_mean += [mutated_behavior_value]
+                self.error_std += [behavior_value]
+                self.error_std += [mutated_behavior_value]
 
 
                 # Decode program strings from byte matrix
                 generated_value_string = [
                     "".join(map(
                         (lambda p: p.decode("utf-8")), 
-                        program)) for program in generated_value.tolist()]
+                        generated_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
                 mutated_generated_value_string = [
                     "".join(map(
                         (lambda p: p.decode("utf-8")), 
-                        program)) for program in mutated_generated_value.tolist()]
+                        mutated_generated_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
                 self.generated_programs += generated_value_string + mutated_generated_value_string
 
 
@@ -1507,8 +1530,8 @@ def test_epf_5(model_checkpoint):
                     "PRE: %.2f" % precision, 
                     "REC: %.2f" % recall,
                     "ACC: %.2f" % (self.syntax_accuracy * 100),
-                    "ERR Mean: %.2f" % self.error_mean.mean(),
-                    "ERR STD: %.2f" % self.error_std.mean())
+                    "ERR Mean:", np.vstack(self.error_mean).mean(axis=0),
+                    "ERR STD:", np.vstack(self.error_std).std(axis=0))
 
                 
                 # Calculate new decision threshold
@@ -1533,7 +1556,7 @@ def test_epf_5(model_checkpoint):
 
 
             # Repeat testing iteratively for varying decision thresholds
-            for i in range(THRESHOLD_RANGE):
+            for i in range(1):
 
                 # Run single batch of testing
                 session.run(group_batch)
@@ -1544,6 +1567,7 @@ def test_epf_5(model_checkpoint):
         data_saver.recall_points, 
         data_saver.precision_points,
         "b--o")
+    plt.title("Syntax Classifier Performance")
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.savefig(
@@ -1556,13 +1580,14 @@ def test_epf_5(model_checkpoint):
     # Construct and save behavior error plot
     plt.errorbar(
         np.arange(10), 
-        data_saver.error_mean, 
-        yerr=data_saver.error_std, 
+        np.vstack(data_saver.error_mean).mean(axis=0), 
+        yerr=np.vstack(data_saver.error_std).std(axis=0), 
         fmt="b--o", 
         ecolor="g", 
         capsize=10)
-    plt.xlabel("IO Example")
-    plt.ylabel("Behavior Error")
+    plt.title("Behavior Function Error")
+    plt.xlabel("Example Input")
+    plt.ylabel("(Predicted - Actual) Output")
     plt.savefig(
         PLOT_BASEDIR + 
         datetime.now().strftime("%Y_%B_%d_%H_%M_%S") + 
