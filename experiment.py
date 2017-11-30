@@ -42,11 +42,10 @@ DATASET_DEFAULT = "0"
 DATASET_MAXIMUM = 64
 DATASET_VOCABULARY = sn.printable
 VOCAB_SIZE = len(DATASET_VOCABULARY)
-TOTAL_MUTATIONS = 3
 
 
 # Batch and logging configuration constants
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 TOTAL_EXAMPLES = 9330
 EPOCH_SIZE = TOTAL_EXAMPLES // BATCH_SIZE
 TOTAL_LOGS = 100
@@ -80,8 +79,6 @@ ENSEMBLE_SIZE = 1
 LSTM_SIZE = (len(DATASET_VOCABULARY) * 2 * ENSEMBLE_SIZE)
 DROPOUT_PROBABILITY = (1 / ENSEMBLE_SIZE)
 USE_DROPOUT = False
-USE_MUTATIONS = True
-USE_ADVERSARY = True
 
 
 # Behavior function hyperparameters
@@ -227,9 +224,9 @@ def get_training_batch():
 
 
 # Creates a mutated program batch
-def mutate_program_batch(program_batch):
+def mutate_program_batch(program_batch, length_batch):
 
-    # Generate mutation indices for each character tensor
+    # Generate mutation indices for each mutated character tensor
     batch_mutations = tf.random_uniform(
         [BATCH_SIZE, TOTAL_MUTATIONS], 
         minval=10, 
@@ -237,11 +234,11 @@ def mutate_program_batch(program_batch):
         dtype=tf.int32)
 
 
-    # Enumerate each program in batch for mutations
+    # Enumerate each program in batch
     program_indices = tf.constant([[[i] for _ in range(TOTAL_MUTATIONS)] for i in range(BATCH_SIZE)])
 
 
-    # Generate mutation indices for each program
+    # Generate locations within each program for mutations
     mutation_indices = tf.random_uniform(
         [BATCH_SIZE, TOTAL_MUTATIONS, 1], 
         minval=0, 
@@ -249,8 +246,14 @@ def mutate_program_batch(program_batch):
         dtype=tf.int32)
 
 
-    # Combine mutation indices with program enumeration
-    indices = tf.concat([program_indices, mutation_indices], 2)
+    # Ensure that mutation occurs within program length
+    modulated_indices = tf.mod(
+        mutation_indices, 
+        tf.tile(tf.reshape(length_batch, [BATCH_SIZE, 1, 1]), [1, TOTAL_MUTATIONS, 1]))
+
+
+    # Combine modulated indices with program enumeration
+    indices = tf.concat([program_indices, modulated_indices], 2)
 
 
     # Convert chartacter mutations to one hot tensor
@@ -415,7 +418,7 @@ def inference_syntax(program_batch, length_batch):
         linear_b = initialize_biases_cpu(
             (scope.name + EXTENSION_BIASES), 
             [1])
-        output_batch = tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b)
+        output_batch = tf.sigmoid(tf.add(tf.tensordot(tf.concat(output_batch, 2), linear_w, 2), linear_b))
 
 
         # Add parameters to collection for training
@@ -896,7 +899,7 @@ def difference_loss(prediction, labels, collection):
 # Compute regularization loss due to KL divergence from initial prior
 def kld_loss(mean, variance, collection):
 
-    # Compute actual KL divrgence of latent distribution from normal
+    # Compute actual KL divrgence of latent distribution from prior
     divergence_loss = KLD_REGULARIZATION * tf.contrib.distributions.kl_divergence(
         tf.distributions.Normal(
             tf.squeeze(mean), 
@@ -962,7 +965,13 @@ def minimize(loss, parameters):
 
 
 # Run single training cycle on dataset
-def train_epf_5(num_epochs=1, model_checkpoint=None):
+def train_epf_5(num_epochs=1, phase=0, mutations=1, model_checkpoint=None):
+
+    # Declare global training phase, and number mutations for curriculum learning
+    global CURRICULUM_PHASE, TOTAL_MUTATIONS
+    CURRICULUM_PHASE = phase
+    TOTAL_MUTATIONS = mutations
+
 
     # Reset lstm kernel
     reset_kernel()
@@ -984,6 +993,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
         encoded_batch = tf.transpose(latent_batch.sample([
             VOCAB_SIZE,
             DATASET_MAXIMUM])) * variance_batch + mean_batch
+        program_string = detokenize_program(program_batch)
 
 
         # Generate new program, and encode behavior distribution
@@ -998,30 +1008,28 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
         generated_string = detokenize_program(generated_batch)
 
 
-        # Should we compute character mutations of program batch
-        if USE_MUTATIONS:
-
-            # Compute random character mutations, and encode behavior distribution
-            mutated_batch = mutate_program_batch(program_batch)
-            mutated_mean_batch, mutated_variance_batch = inference_encoder(mutated_batch, length_batch)
-            mutated_latent_batch = tf.distributions.Normal(
+        # Compute random character mutations, and encode behavior distribution
+        mutated_batch = mutate_program_batch(program_batch, length_batch)
+        mutated_mean_batch, mutated_variance_batch = inference_encoder(mutated_batch, length_batch)
+        mutated_latent_batch = tf.distributions.Normal(
             tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
             tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32)
-            mutated_encoded_batch = tf.transpose(mutated_latent_batch.sample([
-                VOCAB_SIZE,
-                DATASET_MAXIMUM])) * mutated_variance_batch + mutated_mean_batch
+        mutated_encoded_batch = tf.transpose(mutated_latent_batch.sample([
+            VOCAB_SIZE,
+            DATASET_MAXIMUM])) * mutated_variance_batch + mutated_mean_batch
+        mutated_string = detokenize_program(mutated_batch)
 
 
-            # Generate corrected program, and encode behavior distribution
-            mutated_generated_batch = inference_generator(mutated_encoded_batch, length_batch)
-            mutated_generated_mean_batch, mutated_generated_variance_batch = inference_encoder(mutated_generated_batch, length_batch)
-            mutated_generated_latent_batch = tf.distributions.Normal(
+        # Generate corrected program, and encode behavior distribution
+        mutated_generated_batch = inference_generator(mutated_encoded_batch, length_batch)
+        mutated_generated_mean_batch, mutated_generated_variance_batch = inference_encoder(mutated_generated_batch, length_batch)
+        mutated_generated_latent_batch = tf.distributions.Normal(
             tf.constant([0.0 for _ in range(BATCH_SIZE)], tf.float32), 
             tf.constant([1.0 for _ in range(BATCH_SIZE)]), tf.float32)
-            mutated_generated_encoded_batch = tf.transpose(mutated_generated_latent_batch.sample([
-                VOCAB_SIZE,
-                DATASET_MAXIMUM])) * mutated_generated_variance_batch + mutated_generated_mean_batch
-            mutated_generated_string = detokenize_program(mutated_generated_batch)
+        mutated_generated_encoded_batch = tf.transpose(mutated_generated_latent_batch.sample([
+            VOCAB_SIZE,
+            DATASET_MAXIMUM])) * mutated_generated_variance_batch + mutated_generated_mean_batch
+        mutated_generated_string = detokenize_program(mutated_generated_batch)
 
 
         # Compute syntax of original source code
@@ -1033,12 +1041,11 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Compute syntax of mutated source code
-        if USE_MUTATIONS:
-            mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
-            mutated_syntax_loss = similarity_loss(
-                mutated_syntax_batch, 
-                tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
-                (PREFIX_SYNTAX + COLLECTION_LOSSES))
+        mutated_syntax_batch = inference_syntax(mutated_batch, length_batch)
+        mutated_syntax_loss = similarity_loss(
+            mutated_syntax_batch, 
+            tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
+            (PREFIX_SYNTAX + COLLECTION_LOSSES))
 
 
         # Slice examples into input output
@@ -1064,18 +1071,17 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Compute behavior function of mutated code
-        if USE_MUTATIONS:
-            mutated_behavior_batch = inference_behavior(mutated_encoded_batch, length_batch)
-            mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
-            mutated_behavior_loss = similarity_loss(
-                mutated_behavior_prediction, 
-                output_examples_batch,
-                (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
+        mutated_behavior_batch = inference_behavior(mutated_encoded_batch, length_batch)
+        mutated_behavior_prediction = mutated_behavior_batch(input_examples_batch)
+        mutated_behavior_loss = similarity_loss(
+            mutated_behavior_prediction, 
+            output_examples_batch,
+            (PREFIX_BEHAVIOR + COLLECTION_LOSSES))
 
 
         # Compute syntax classification of generated program
-        if USE_ADVERSARY:
-            syntax_generated_batch = inference_syntax(generated_batch, length_batch)
+        syntax_generated_batch = inference_syntax(generated_batch, length_batch)
+        if CURRICULUM_PHASE > 1:
             syntax_generated_loss = similarity_loss(
                 syntax_generated_batch, 
                 tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
@@ -1083,7 +1089,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Detect incorrect syntax in generated code
-        if USE_ADVERSARY:
+        if CURRICULUM_PHASE > 0:
             adversary_syntax_generated_loss = similarity_loss(
                 syntax_generated_batch, 
                 tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
@@ -1091,8 +1097,8 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Compute syntax classification of generated program from mutated input
-        if USE_MUTATIONS and USE_ADVERSARY:
-            syntax_mutated_generated_batch = inference_syntax(mutated_generated_batch, length_batch)
+        syntax_mutated_generated_batch = inference_syntax(mutated_generated_batch, length_batch)
+        if CURRICULUM_PHASE > 1:
             syntax_mutated_generated_loss = similarity_loss(
                 syntax_mutated_generated_batch, 
                 tf.constant([THRESHOLD_UPPER for i in range(BATCH_SIZE)], tf.float32),
@@ -1100,7 +1106,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Detect incorrect syntax in generated code
-        if USE_MUTATIONS and USE_ADVERSARY:
+        if CURRICULUM_PHASE > 0:
             adversary_syntax_mutated_generated_loss = similarity_loss(
                 syntax_mutated_generated_batch, 
                 tf.constant([THRESHOLD_LOWER for i in range(BATCH_SIZE)], tf.float32),
@@ -1108,9 +1114,9 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Compute the behavior of generated program
-        if USE_ADVERSARY:
-            behavior_generated_batch = inference_behavior(generated_encoded_batch, length_batch)
-            behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
+        behavior_generated_batch = inference_behavior(generated_encoded_batch, length_batch)
+        behavior_generated_prediction = behavior_generated_batch(input_examples_batch)
+        if CURRICULUM_PHASE > 1:
             behavior_generated_loss = similarity_loss(
                 behavior_generated_prediction, 
                 behavior_prediction,
@@ -1118,7 +1124,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Detect different behavior in generated code
-        if USE_ADVERSARY:
+        if CURRICULUM_PHASE > 0:
             adversary_behavior_generated_loss = difference_loss(
                 behavior_generated_prediction, 
                 behavior_prediction,
@@ -1126,9 +1132,9 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Compute the behavior of generated program from mutated input
-        if USE_MUTATIONS and USE_ADVERSARY:
-            behavior_mutated_generated_batch = inference_behavior(mutated_generated_encoded_batch, length_batch)
-            behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
+        behavior_mutated_generated_batch = inference_behavior(mutated_generated_encoded_batch, length_batch)
+        behavior_mutated_generated_prediction = behavior_mutated_generated_batch(input_examples_batch)
+        if CURRICULUM_PHASE > 1:
             behavior_mutated_generated_loss = similarity_loss(
                 behavior_mutated_generated_prediction, 
                 mutated_behavior_prediction,
@@ -1136,7 +1142,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
 
 
         # Detect different behavior in generated code
-        if USE_MUTATIONS and USE_ADVERSARY:
+        if CURRICULUM_PHASE > 0:
             adversary_behavior_mutated_generated_loss = difference_loss(
                 behavior_mutated_generated_prediction, 
                 mutated_behavior_prediction,
@@ -1148,11 +1154,10 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
             generated_batch, 
             program_batch,
             (PREFIX_GENERATOR + COLLECTION_LOSSES))
-        if USE_MUTATIONS:
-            identity_mutated_generated_loss = similarity_loss(
-                mutated_generated_batch, 
-                program_batch,
-                (PREFIX_GENERATOR + COLLECTION_LOSSES))
+        identity_mutated_generated_loss = similarity_loss(
+            mutated_generated_batch, 
+            program_batch,
+            (PREFIX_GENERATOR + COLLECTION_LOSSES))
 
         
         # Enfore the latent representation of encoder is probability distribution
@@ -1160,18 +1165,19 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
             mean_batch, 
             variance_batch, 
             (PREFIX_ENCODER + COLLECTION_LOSSES))
-        generated_latent_loss = kld_loss(
-            generated_mean_batch, 
-            generated_variance_batch, 
-            (PREFIX_ENCODER + COLLECTION_LOSSES))
+        if CURRICULUM_PHASE > 0:
+            generated_latent_loss = kld_loss(
+                generated_mean_batch, 
+                generated_variance_batch, 
+                (PREFIX_ENCODER + COLLECTION_LOSSES))
 
 
         # Compute divergence loss for mutated programs
-        if USE_MUTATIONS:
-            mutated_latent_loss = kld_loss(
-                mutated_mean_batch, 
-                mutated_variance_batch, 
-                (PREFIX_ENCODER + COLLECTION_LOSSES))
+        mutated_latent_loss = kld_loss(
+            mutated_mean_batch, 
+            mutated_variance_batch, 
+            (PREFIX_ENCODER + COLLECTION_LOSSES))
+        if CURRICULUM_PHASE > 0:
             mutated_generated_latent_loss = kld_loss(
                 mutated_generated_mean_batch, 
                 mutated_generated_variance_batch, 
@@ -1221,7 +1227,10 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                     behavior_loss,
                     generator_loss,
                     encoder_loss,
+                    program_string,
                     generated_string,
+                    mutated_string,
+                    mutated_generated_string,
                     length_batch])
 
 
@@ -1229,7 +1238,7 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
             def after_run(self, run_context, run_values):
                 
                 # Obtain graph results
-                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value, encoder_loss_value, generated_string_value, length_value = run_values.results
+                current_step, syntax_loss_value, behavior_loss_value, generator_loss_value, encoder_loss_value, program_string_value, generated_string_value, mutated_string_value, mutated_generated_string_value, length_value = run_values.results
 
 
                 # Calculate weighted speed
@@ -1241,11 +1250,23 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                 # Update every period of steps
                 if current_step % max(num_steps // TOTAL_LOGS, 1) == 0:
 
-                    # Read the current generated program string
+                    # Read the current program strings, and decode with UTF-8 format
+                    program_string_value = [
+                        "".join(map(
+                            (lambda p: p.decode("utf-8")), 
+                            program_string_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
                     generated_string_value = [
                         "".join(map(
                             (lambda p: p.decode("utf-8")), 
                             generated_string_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
+                    mutated_string_value = [
+                        "".join(map(
+                            (lambda p: p.decode("utf-8")), 
+                            mutated_string_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
+                    mutated_generated_string_value = [
+                        "".join(map(
+                            (lambda p: p.decode("utf-8")), 
+                            mutated_generated_string_value.tolist()[i][:length_value[i]])) for i in range(BATCH_SIZE)]
 
 
                     # Display date, batch speed, estimated time, loss, and generated program
@@ -1258,7 +1279,10 @@ def train_epf_5(num_epochs=1, model_checkpoint=None):
                         "SYN: %.2f" % syntax_loss_value,
                         "BEH: %.2f" % behavior_loss_value,
                         "GEN: %.2f" % generator_loss_value)
-                    print(generated_string_value[0])
+                    print("Original Program:", program_string_value[0])
+                    print("Generated Program:", generated_string_value[0])
+                    print("Mutated Program:", mutated_string_value[0])
+                    print("Mutated Generated Program:", mutated_generated_string_value[0])
                     print()
 
 
@@ -1380,7 +1404,7 @@ def test_epf_5(model_checkpoint):
 
 
         # Obtain character mutations of programs, and generate corrected program
-        mutated_batch = mutate_program_batch(program_batch)
+        mutated_batch = mutate_program_batch(program_batch, length_batch)
         mutated_generated_batch = inference_generator(mutated_batch, length_batch)
 
 
@@ -1450,6 +1474,8 @@ def test_epf_5(model_checkpoint):
             
             # Session is initialized
             def begin(self):
+                self.start_time = time()
+                self.current_step = 0
                 self.syntax_accuracy = 0.0
                 self.error_mean = []
                 self.error_std = []
@@ -1460,6 +1486,7 @@ def test_epf_5(model_checkpoint):
 
             # Just before inference
             def before_run(self, run_context):
+                self.current_step += 1
                 return tf.train.SessionRunArgs([
                     syntax_batch, 
                     mutated_syntax_batch,
@@ -1479,6 +1506,12 @@ def test_epf_5(model_checkpoint):
 
                 # Obtain graph results
                 syntax_value, mutated_syntax_value, behavior_value, mutated_behavior_value, generated_value, mutated_generated_value, length_value = run_values.results
+
+
+                # Calculate weighted speed
+                current_time = time()
+                batch_speed = 1.0 / (current_time - self.start_time + 1e-3)
+                self.start_time = current_time
 
 
                 # Calculations for precision and recall
@@ -1530,8 +1563,8 @@ def test_epf_5(model_checkpoint):
                     "PRE: %.2f" % precision, 
                     "REC: %.2f" % recall,
                     "ACC: %.2f" % (self.syntax_accuracy * 100),
-                    "ERR Mean:", np.vstack(self.error_mean).mean(axis=0),
-                    "ERR STD:", np.vstack(self.error_std).std(axis=0))
+                    "SPD: %.2f bat/sec" % batch_speed,
+                    "ETA: %.2f hrs" % ((EPOCH_SIZE - self.current_step) / batch_speed / 60 / 60))
 
                 
                 # Calculate new decision threshold
