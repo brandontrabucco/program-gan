@@ -83,8 +83,9 @@ USE_DROPOUT = False
 
 # Behavior function hyperparameters
 BEHAVIOR_WIDTH = 4
-BEHAVIOR_DEPTH= 2
-BEHAVIOR_TOPOLOGY = ([[1, BEHAVIOR_WIDTH]] + 
+BEHAVIOR_DEPTH = 2
+BEHAVIOR_ORDER = 4
+BEHAVIOR_TOPOLOGY = ([[BEHAVIOR_ORDER, BEHAVIOR_WIDTH]] + 
     [[BEHAVIOR_WIDTH, BEHAVIOR_WIDTH] for i in range(BEHAVIOR_DEPTH)] + 
     [[BEHAVIOR_WIDTH, 1]])
 
@@ -575,8 +576,9 @@ def inference_behavior(encoded_batch, length_batch):
     # Compute expected output given input example
     def behavior_function(input_examples):
 
-        # Add additional dimension end of input
-        activation = tf.expand_dims(input_examples, -1)
+        # Prepare activations for combining polynomial terms
+        input_examples = tf.expand_dims(input_examples, -1)
+        activation = tf.concat([input_examples**(i + 1) for i in range(BEHAVIOR_ORDER)], -1)
 
 
         # Compute hypernet behavior function
